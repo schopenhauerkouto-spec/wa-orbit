@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <meta name="description" content="WA Orbit — tableau de bord de gestion de contacts WhatsApp et de conversations consenties.">
+  <title>WA Orbit — Contact Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <section id="loginScreen" class="login-screen hidden" aria-label="Connexion">
+    <div class="login-card">
+      <div class="brand-mark large">W<span>✳</span></div>
+      <p class="eyebrow">ESPACE PRIVÉ</p>
+      <h1>Bienvenue sur<br><span>WA Orbit.</span></h1>
+      <p class="muted">Ton centre de pilotage des contacts et conversations.</p>
+      <form id="loginForm" class="stack-form">
+        <label for="loginPassword">Mot de passe administrateur</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="Ton mot de passe" required>
+        <button class="btn btn-primary full" type="submit">Accéder au tableau de bord <span>→</span></button>
+        <p id="loginError" class="form-error" role="alert"></p>
+      </form>
+      <p class="fine-print">Application privée · Les identifiants API restent sur le serveur.</p>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell hidden">
+    <aside class="sidebar">
+      <a class="brand" href="#overview" data-page="overview">
+        <span class="brand-mark">W<span>✳</span></span>
+        <span class="brand-copy"><strong>WA ORBIT</strong><small>CONTACT HUB</small></span>
+      </a>
+      <div class="workspace-chip"><span class="online-dot"></span><span>Workspace personnel</span><span class="chevron">⌄</span></div>
+      <p class="nav-label">ESPACE DE TRAVAIL</p>
+      <nav class="main-nav" aria-label="Navigation principale">
+        <button class="nav-item active" data-page="overview"><span class="nav-icon">◫</span>Vue d'ensemble</button>
+        <button class="nav-item" data-page="contacts"><span class="nav-icon">♙</span>Contacts <span id="navContactCount" class="nav-count">0</span></button>
+        <button class="nav-item" data-page="inbox"><span class="nav-icon">▤</span>Conversations <span id="navInboxCount" class="nav-count subtle">0</span></button>
+        <button class="nav-item" data-page="campaigns"><span class="nav-icon">↗</span>Messages</button>
+        <button class="nav-item" data-page="status"><span class="nav-icon">◉</span>Statuts</button>
+      </nav>
+      <p class="nav-label second-label">CONFIGURATION</p>
+      <nav class="main-nav">
+        <button class="nav-item" data-page="settings"><span class="nav-icon">⚙</span>Paramètres</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="safety-mini"><span class="shield">⬡</span><div><strong>Mode responsable</strong><small>Consentement & contrôle actifs</small></div><span class="status-pip"></span></div>
+        <div class="profile-row"><div class="avatar">S</div><div class="profile-info"><strong>Schopenhauer</strong><small>Administrateur</small></div><button id="logoutBtn" class="icon-btn" title="Déconnexion" aria-label="Déconnexion">↗</button></div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Workspace</span><b>/</b><strong id="breadcrumbCurrent">Vue d'ensemble</strong></div>
+        <div class="topbar-actions">
+          <span id="connectionBadge" class="connection-badge"><i></i> Vérification API…</span>
+          <button class="icon-btn help-btn" title="Aide" aria-label="Aide">?</button>
+          <div class="avatar top-avatar">S</div>
+        </div>
+      </header>
+
+      <section id="page-overview" class="page active-page">
+        <div class="page-heading heading-row">
+          <div><p class="eyebrow">DIMANCHE, 01 NOVEMBRE 2026</p><h1>Votre réseau, <span>sous contrôle.</span></h1><p class="muted">Une vue claire de tes contacts, de tes échanges et de tes autorisations.</p></div>
+          <button class="btn btn-primary" data-page="contacts"><span class="btn-plus">＋</span> Gérer les contacts</button>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-copy"><div class="hero-tag"><span class="sparkle">✦</span> TON ESPACE DE PILOTAGE</div><h2>La bonne interaction.<br><em>Au bon moment.</em></h2><p>Garde ton réseau organisé, respecte les préférences de chacun et ne laisse aucune conversation sans contexte.</p><button class="hero-link" data-page="inbox">Ouvrir les conversations <span>↗</span></button></div>
+          <div class="orbit-visual" aria-hidden="true"><div class="orbit orbit-a"></div><div class="orbit orbit-b"></div><div class="orbit orbit-c"></div><div class="orbit-core">W<span>✳</span></div><span class="orbit-node node-one">✦</span><span class="orbit-node node-two">↗</span><span class="orbit-node node-three">◌</span><span class="orbit-node node-four">✧</span></div>
+          <div class="hero-foot"><span><i class="tiny-dot"></i> Contrôles de consentement activés</span><span>WA ORBIT / 01</span></div>
+        </div>
+        <div class="section-head"><div><p class="eyebrow">VUE GLOBALE</p><h2>Les indicateurs clés</h2></div><span class="updated-label">Actualisé à l’ouverture</span></div>
+        <div class="stats-grid">
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Contacts enregistrés</span><span class="stat-icon purple">♙</span></div><div class="stat-value" id="statContacts">0</div><div class="stat-foot">Dans ton carnet Orbit</div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Consentements actifs</span><span class="stat-icon green">✓</span></div><div class="stat-value" id="statEligible">0</div><div class="stat-foot"><span class="positive">Autorisés</span> à recevoir un message</div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Conversations démarrées</span><span class="stat-icon blue">▤</span></div><div class="stat-value" id="statConversations">0</div><div class="stat-foot">Contacts ayant répondu</div></article>
+          <article class="stat-card"><div class="stat-top"><span class="stat-label">Contacts en pause</span><span class="stat-icon orange">Ⅱ</span></div><div class="stat-value" id="statPaused">0</div><div class="stat-foot">Sans consentement ou bloqués</div></article>
+        </div>
+        <div class="overview-lower">
+          <article class="panel recent-panel"><div class="panel-heading"><div><p class="eyebrow">ACTIVITÉ RÉCENTE</p><h3>Derniers événements</h3></div><button class="text-action" data-page="inbox">Tout voir ↗</button></div><div id="recentEvents" class="event-list"><div class="empty-state compact"><span>◷</span><strong>Pas encore d’activité</strong><p>Les événements apparaîtront ici.</p></div></div></article>
+          <article class="panel readiness-panel"><div class="panel-heading"><div><p class="eyebrow">ÉTAT DU SYSTÈME</p><h3>Prêt à fonctionner ?</h3></div><span class="readiness-icon">◈</span></div><div class="readiness-item"><span class="readiness-check" id="waCheck">·</span><div><strong>WhatsApp Cloud API</strong><small id="waReadiness">À configurer dans .env</small></div><span class="readiness-state" id="waState">À FAIRE</span></div><div class="readiness-item"><span class="readiness-check" id="aiCheck">·</span><div><strong>IA Groq</strong><small id="aiReadiness">Réponses intelligentes et brouillons</small></div><span class="readiness-state" id="aiState">OPTIONNEL</span></div><div class="readiness-item"><span class="readiness-check done">✓</span><div><strong>Protection des identifiants</strong><small>Secrets stockés côté serveur</small></div><span class="readiness-state ready">ACTIF</span></div><button class="btn btn-outline full" data-page="settings">Configurer les intégrations <span>→</span></button></article>
+        </div>
+        <div class="bottom-note"><span>✦</span><p><strong>À retenir :</strong> importer un numéro ne signifie pas obtenir son consentement. Les contacts importés restent inéligibles jusqu’à confirmation explicite.</p><button data-page="contacts">Voir les règles →</button></div>
+      </section>
+
+      <section id="page-contacts" class="page">
+        <div class="page-heading heading-row"><div><p class="eyebrow">CARNET CENTRAL</p><h1>Gestion des <span>contacts.</span></h1><p class="muted">Importe, organise et suis les autorisations. Rien ne part sans contrôle.</p></div><div class="heading-actions"><label class="btn btn-outline" for="importFile">↑ Importer VCF / CSV</label><input id="importFile" type="file" accept=".vcf,.vcard,.csv,text/vcard,text/csv" hidden><button id="addContactBtn" class="btn btn-primary"><span class="btn-plus">＋</span> Nouveau contact</button></div></div>
+        <div class="stats-strip"><div><strong id="contactTotal">0</strong><span>Total contacts</span></div><div><strong id="contactConsented">0</strong><span>Consentements actifs</span></div><div><strong id="contactConvo">0</strong><span>En conversation</span></div><div><strong id="contactStopped">0</strong><span>En pause / opt-out</span></div></div>
+        <div class="panel contacts-panel"><div class="table-toolbar"><div class="search-box"><span>⌕</span><input id="contactSearch" type="search" placeholder="Rechercher un nom ou un numéro…"></div><select id="contactFilter" class="filter-select" aria-label="Filtrer les contacts"><option value="all">Tous les contacts</option><option value="eligible">Consentement actif</option><option value="consent-required">Consentement requis</option><option value="conversation">Conversation démarrée</option><option value="opt-out">Opt-out / bloqués</option></select><button id="exportContactsBtn" class="btn btn-ghost">↓ Exporter</button></div><div class="table-wrap"><table><thead><tr><th>CONTACT</th><th>NUMÉRO</th><th>AUTORISATION</th><th>ÉTAPE</th><th>DERNIER ÉCHANGE</th><th></th></tr></thead><tbody id="contactsBody"><tr><td colspan="6" class="table-empty">Ton carnet est vide pour le moment.</td></tr></tbody></table></div><div class="table-footer"><span id="contactCountLabel">0 contact</span><span>Les numéros importés n'ont pas de consentement par défaut.</span></div></div>
+      </section>
+
+      <section id="page-inbox" class="page">
+        <div class="page-heading"><p class="eyebrow">CENTRE DE CONVERSATION</p><h1>La boîte de <span>réception.</span></h1><p class="muted">Les messages reçus, réponses automatiques du bot et événements WhatsApp remontent ici via le webhook Meta.</p></div>
+        <div class="inbox-layout"><div class="panel inbox-list-panel"><div class="panel-heading"><div><p class="eyebrow">FLUX ENTRANT</p><h3>Activité récente</h3></div><button id="refreshEventsBtn" class="icon-btn" title="Actualiser">↻</button></div><div id="inboxEvents" class="event-list"><div class="empty-state"><span>▤</span><strong>Aucune conversation reçue</strong><p>Configure le webhook Meta pour recevoir les réponses.</p></div></div></div><div class="panel inbox-info-panel"><div class="inbox-illustration">▤</div><p class="eyebrow">RÈGLE DE CONVERSATION</p><h3>Une réponse change tout.</h3><p>Dès qu’un contact t’écrit, Orbit marque la conversation comme démarrée et bloque toute nouvelle sollicitation de campagne. Tu peux toutefois répondre manuellement dans la fenêtre de service de 24 heures.</p><div class="rule-chip"><span>✓</span> Pas de relance automatique après réponse</div><div class="rule-chip"><span>✓</span> Demande STOP = blocage immédiat</div></div></div>
+      </section>
+
+      <section id="page-campaigns" class="page">
+        <div class="page-heading"><p class="eyebrow">MESSAGERIE CONTRÔLÉE</p><h1>Préparer un <span>message.</span></h1><p class="muted">Un seul destinataire à la fois, validation humaine obligatoire et règles Meta respectées.</p></div>
+        <div class="message-grid"><div class="panel message-composer"><div class="panel-heading"><div><p class="eyebrow">NOUVEL ÉCHANGE</p><h3>Composer un message</h3></div><span class="composer-symbol">✳</span></div><form id="messageForm" class="stack-form"><label for="messageContact">Destinataire</label><select id="messageContact" required><option value="">Choisir un contact autorisé…</option></select><div id="recipientHint" class="helper-box">Choisis un contact pour vérifier les conditions d’envoi.</div><label>Type de message</label><div class="segmented"><label><input type="radio" name="messageMode" value="text" checked><span>Réponse libre (24 h)</span></label><label><input type="radio" name="messageMode" value="template"><span>Modèle approuvé</span></label></div><div id="textModeFields"><label for="messageText">Texte du message</label><textarea id="messageText" rows="5" maxlength="4096" placeholder="Écris ta réponse ici…"></textarea><div class="textarea-foot"><span>Une réponse claire, utile et respectueuse.</span><span id="charCount">0 / 4096</span></div><label for="draftContext">Contexte pour l’IA (facultatif)</label><textarea id="draftContext" rows="3" maxlength="500" placeholder="Colle ici le dernier message reçu ou précise le contexte utile…"></textarea><div class="ai-tools"><div><strong>Assistant IA</strong><small>Génère un brouillon à relire, jamais envoyé automatiquement.</small></div><button id="generateDraftBtn" type="button" class="btn btn-soft">✦ Générer</button></div></div><div id="templateModeFields" class="hidden"><label for="templateName">Nom exact du modèle approuvé</label><input id="templateName" type="text" placeholder="ex. bienvenue_client"><label for="templateLanguage">Code langue</label><input id="templateLanguage" type="text" value="fr" placeholder="fr"><p class="field-hint">Le modèle doit déjà être approuvé dans WhatsApp Manager. L’API ne crée pas son approbation.</p></div><label class="consent-confirm"><input id="sendApproval" type="checkbox" required><span>Je confirme avoir vérifié le consentement du destinataire et le contenu du message.</span></label><button class="btn btn-primary full" type="submit">Envoyer via WhatsApp <span>↗</span></button><p id="sendFeedback" class="form-feedback" role="status"></p></form></div><aside class="panel message-side"><p class="eyebrow">GARDE-FOUS</p><h3>Avant chaque envoi.</h3><div class="guard-item"><span class="guard-number">01</span><div><strong>Consentement</strong><p>Le numéro doit être autorisé. Un import de carnet ne suffit pas.</p></div></div><div class="guard-item"><span class="guard-number">02</span><div><strong>Fenêtre 24 heures</strong><p>Un message libre est possible en réponse à un message entrant récent.</p></div></div><div class="guard-item"><span class="guard-number">03</span><div><strong>Modèle approuvé</strong><p>Hors fenêtre, utilise un modèle approuvé et un consentement valide.</p></div></div><div class="guard-item"><span class="guard-number">04</span><div><strong>Pas de deuxième sollicitation</strong><p>Une conversation démarrée bloque les nouveaux messages de prospection.</p></div></div><div class="warning-box"><span>ⓘ</span><p>Les quotas locaux évitent les erreurs répétées. Ils ne garantissent jamais l’absence de restriction par WhatsApp.</p></div></aside></div>
+      </section>
+
+      <section id="page-status" class="page">
+        <div class="page-heading"><p class="eyebrow">AUDIENCE & VISIBILITÉ</p><h1>Les <span>statuts WhatsApp.</span></h1><p class="muted">Comprendre ce que l’API officielle permet — et ce qu’elle ne permet pas.</p></div>
+        <div class="status-feature"><div class="status-ring">◉</div><div><span class="feature-label">LIMITATION DE LA CLOUD API</span><h2>Les vues de statuts ne sont pas exposées.</h2><p>WhatsApp Cloud API ne fournit pas un accès permettant de consulter automatiquement les statuts personnels des contacts, de voir qui les a regardés ou de générer des vues. Cette page sert donc de repère, pas de robot de visualisation.</p><a href="https://faq.whatsapp.com/1401592180746512/" target="_blank" rel="noreferrer" class="text-action">Voir l’aide officielle WhatsApp ↗</a></div></div>
+        <div class="status-cards"><article class="panel"><span class="stat-icon green">✓</span><h3>Ce que tu peux faire</h3><p>Publier tes propres statuts depuis WhatsApp et consulter les vues directement dans l’application, selon les paramètres de confidentialité et confirmations de lecture.</p></article><article class="panel"><span class="stat-icon orange">⊘</span><h3>Ce que l’API ne fait pas</h3><p>Lire les statuts des contacts, forcer une vue, simuler des vues ou exposer la liste des personnes ayant regardé un statut tiers.</p></article></div>
+      </section>
+
+      <section id="page-settings" class="page">
+        <div class="page-heading"><p class="eyebrow">CENTRE DE CONFIGURATION</p><h1>Paramètres & <span>intégrations.</span></h1><p class="muted">Les clés restent dans le fichier .env côté serveur. Ne les colle jamais dans le navigateur.</p></div>
+        <div class="settings-grid"><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">META BUSINESS</p><h3>WhatsApp Cloud API</h3></div><span class="settings-logo">◉</span></div><div id="whatsappSettingsState" class="integration-state pending"><span></span><strong>Configuration à vérifier</strong></div><p>Le serveur attend un access token, un Phone Number ID et une version Graph API valide.</p><div class="config-rows"><div><span>Access token</span><strong id="tokenPresence">Non détecté</strong></div><div><span>Phone Number ID</span><strong id="phoneIdPresence">Non détecté</strong></div><div><span>Version API</span><strong id="versionPresence">Non détectée</strong></div></div><button class="btn btn-outline full" id="recheckConfigBtn">Vérifier la configuration ↻</button></article><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">WEBHOOK</p><h3>Réception des messages</h3></div><span class="settings-logo purple">⌁</span></div><p>Meta doit pouvoir joindre cette URL publique en HTTPS. En local, un tunnel de développement est nécessaire pour tester les webhooks.</p><div class="webhook-url" id="webhookUrl">http://localhost:3000/webhook</div><p class="field-hint" id="webhookReadiness">App Secret et Verify Token à configurer côté serveur.</p><button class="btn btn-ghost full" id="copyWebhookBtn">Copier l’URL ↗</button></article><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">GÉNÉRATION DE TEXTE</p><h3>Assistant Groq</h3></div><span class="settings-logo gold">✦</span></div><div id="aiSettingsState" class="integration-state pending"><span></span><strong>IA facultative non configurée</strong></div><p>Groq prépare les réponses du bot. Les commandes simples sont traitées localement pour économiser les appels IA.</p><div class="config-rows"><div><span>Clé Groq</span><strong id="aiKeyPresence">Non détectée</strong></div><div><span>Modèle</span><strong id="aiModelPresence">Non détecté</strong></div><div><span>Réponses automatiques</span><strong id="autoReplyPresence">Désactivées</strong></div></div><button class="btn btn-outline full" id="aiHelpBtn">Voir le guide de configuration</button></article><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">STOCKAGE</p><h3>Base de données</h3></div><span class="settings-logo purple">▤</span></div><div id="databaseSettingsState" class="integration-state pending"><span></span><strong>Vérification du stockage</strong></div><p>Les contacts, conversations et compteurs IA sont enregistrés dans PostgreSQL lorsque la base distante est configurée.</p><div class="config-rows"><div><span>Mode actif</span><strong id="storageModeLabel">—</strong></div><div><span>Sessions admin</span><strong id="sessionStorageLabel">—</strong></div></div></article></div>
+        <article class="panel groq-quota-panel"><div class="panel-heading"><div><p class="eyebrow">CONSOMMATION IA</p><h3>Garde-fou Groq Free Tier</h3></div><span class="settings-logo gold">◉</span></div><div class="config-rows"><div><span>Modèle actif</span><strong id="groqQuotaModel">—</strong></div><div><span>Requêtes du jour</span><strong id="groqQuotaRequests">—</strong></div><div><span>Tokens estimés du jour</span><strong id="groqQuotaTokens">—</strong></div><div><span>Réserve par minute</span><strong id="groqQuotaMinute">—</strong></div></div><p id="groqQuotaState" class="field-hint">Les compteurs sont enregistrés avec les données du bot.</p><button class="btn btn-outline full" id="refreshQuotaBtn" type="button">Actualiser les compteurs ↻</button></article>
+        <div class="security-banner"><span>⬡</span><div><strong>Ne partage jamais tes secrets.</strong><p>Si tu as déjà publié ton token ou l’as envoyé à quelqu’un, révoque-le depuis Meta et génère-en un nouveau. Le fichier .env est ignoré par Git.</p></div></div>
+      </section>
+
+      <footer class="app-footer"><span>WA ORBIT <b>·</b> CONTACT HUB</span><span>Conçu pour des échanges consentis.</span></footer>
+    </main>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Navigation mobile">
+    <button class="active" data-page="overview"><span>◫</span><small>Accueil</small></button><button data-page="contacts"><span>♙</span><small>Contacts</small></button><button data-page="inbox"><span>▤</span><small>Inbox</small></button><button data-page="campaigns"><span>↗</span><small>Messages</small></button><button data-page="settings"><span>⚙</span><small>Réglages</small></button>
+  </nav>
+
+  <dialog id="contactDialog" class="modal">
+    <form id="contactForm" class="modal-card">
+      <div class="modal-head"><div><p class="eyebrow">CARNET ORBIT</p><h2>Ajouter un contact</h2></div><button type="button" class="icon-btn" data-close-dialog="contactDialog">×</button></div>
+      <label for="newContactName">Nom</label><input id="newContactName" required maxlength="100" placeholder="Ex. Koffi">
+      <label for="newContactPhone">Numéro au format international</label><input id="newContactPhone" required placeholder="+2250700000000" inputmode="tel">
+      <label class="consent-confirm"><input id="newContactConsent" type="checkbox"><span>Cette personne a explicitement accepté de recevoir mes messages WhatsApp.</span></label>
+      <p class="field-hint">Laisse décoché si tu n’as pas encore son autorisation. Tu pourras la mettre à jour plus tard.</p>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" data-close-dialog="contactDialog">Annuler</button><button type="submit" class="btn btn-primary">Enregistrer le contact</button></div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/js/app.js" defer></script>
+</body>
+</html>
