@@ -515,17 +515,23 @@ app.post('/webhook', express.raw({ type: 'application/json', limit: '2mb' }), as
             db.processedMessageIds.push(incomingId);
             db.processedMessageIds = db.processedMessageIds.slice(-10000);
           }
+          const sender = (value.contacts || []).find(item =>
+            normalizePhone(item?.wa_id || '').replace(/^\\+/, '') === phone.replace(/^\\+/, '')
+          );
+          const senderName = shortText(sender?.profile?.name || '', 100);
           let contact = findContactByPhone(phone);
           const text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || '';
           const messageType = message.type || 'unknown';
           addEvent({ kind: 'incoming', phone, text: shortText(text, 1200) || `[Message de type ${messageType}]`, messageId: incomingId, type: messageType });
           if (!contact) {
             contact = {
-              id: crypto.randomUUID(), name: phone, phone, optedIn: false, optInSource: '', optInDate: null,
+              id: crypto.randomUUID(), name: senderName || phone, phone, optedIn: false, optInSource: '', optInDate: null,
               tags: [], stage: 'conversation', conversationStarted: true, blocked: false, messages: [],
               createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
             };
             db.contacts.push(contact);
+          } else if (senderName && (!contact.name || contact.name === contact.phone)) {
+            contact.name = senderName;
           }
           const inboundTimestamp = Number(message.timestamp || Date.now() / 1000) * 1000;
           const inboundDate = new Date(inboundTimestamp);
@@ -535,8 +541,14 @@ app.post('/webhook', express.raw({ type: 'application/json', limit: '2mb' }), as
           contact.updatedAt = new Date().toISOString();
           contact.messages = Array.isArray(contact.messages) ? contact.messages : [];
           const historyBeforeMessage = contact.messages.slice(-6).map(item => ({ role: item.role, content: shortText(item.content, 700) }));
-          if (text) {
-            contact.messages.push({ role: 'user', content: shortText(text, 1200), at: contact.lastInboundAt });
+          if (text || messageType !== 'unknown') {
+            contact.messages.push({
+              role: 'user',
+              content: text ? shortText(text, 1200) : `[Message ${messageType} reçu]`,
+              at: contact.lastInboundAt,
+              messageId: incomingId,
+              type: messageType
+            });
             contact.messages = contact.messages.slice(-40);
           }
           const stopWords = /^(stop|arr[eê]t|unsubscribe|unsub|cancel|annule|d[eé]sabonn(?:e|ement)|d[eé]sinscri(?:s|re|ption)|ne plus m.{0,8}ecrire|ne me contactez plus)[\s.!?]*$/i;
