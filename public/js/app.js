@@ -73,12 +73,12 @@ function showPage(page) {
 }
 
 async function loadData() {
-  const [contacts, events, config] = await Promise.all([
-    api('/api/contacts'), api('/api/events'), api('/api/config')
+  const [contacts, events, config, safety] = await Promise.all([
+    api('/api/contacts'), api('/api/events'), api('/api/config'), api('/api/safety')
   ]);
   state.contacts = contacts;
   state.events = events;
-  state.config = config;
+  state.config = { ...config, safety };
   renderAll();
 }
 
@@ -321,6 +321,17 @@ async function handleConversationReply(event) {
 function renderSettings() {
   const cfg = state.config;
   if (!cfg) return;
+  const safety = cfg.safety || { paused: true };
+  const safetyNode = $('#safetyState');
+  safetyNode.classList.toggle('ready', safety.paused === false);
+  safetyNode.classList.toggle('pending', safety.paused !== false);
+  safetyNode.querySelector('strong').textContent = safety.paused ? 'Système en pause — envois bloqués' : 'Système disponible — contrôles actifs';
+  $('#safetyModeLabel').textContent = safety.paused ? 'PAUSE ACTIVE' : 'ACTIF';
+  $('#safetyUpdatedLabel').textContent = formatTime(safety.updatedAt) || '—';
+  const safetyButton = $('#safetyToggleBtn');
+  safetyButton.textContent = safety.paused ? 'Reprendre après vérification' : 'Activer l’arrêt d’urgence';
+  safetyButton.classList.toggle('btn-primary', safety.paused);
+  safetyButton.classList.toggle('btn-outline', !safety.paused);
   const wa = cfg.whatsapp;
   $('#tokenPresence').textContent = wa.tokenPresent ? 'Détecté · masqué' : 'Non détecté';
   $('#phoneIdPresence').textContent = wa.phoneNumberIdPresent ? 'Détecté · masqué' : 'Non détecté';

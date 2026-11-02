@@ -2,7 +2,7 @@ name: WA Orbit checks
 
 on:
   push:
-    branches: [main, feat/inbox-conversations]
+    branches: [main, feat/inbox-conversations, feat/remote-connection-safety-foundation]
   pull_request:
     branches: [main]
 

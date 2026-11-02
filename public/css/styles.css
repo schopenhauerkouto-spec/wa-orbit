@@ -8,3 +8,5 @@
 .groq-quota-panel{margin-top:15px}.groq-quota-panel .config-rows{max-width:760px}.groq-quota-panel .field-hint{margin:0 0 12px}.groq-quota-panel .btn{max-width:260px}
 
 .row-action.is-muted { opacity: .55; cursor: default; }
+
+.safety-control-card{border:1px solid #f0dfc8}.safety-control-card .btn{min-height:38px}
