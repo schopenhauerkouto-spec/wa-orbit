@@ -128,6 +128,16 @@ try {
   const cookie = setCookie.split(';')[0];
   assert.ok(cookie.includes('waorbit.sid='), 'Le cookie de session doit être émis.');
 
+  const safetyInitial = await fetch(`${baseUrl}/api/safety`, { headers: { cookie } });
+  assert.equal(safetyInitial.status, 200);
+  assert.equal((await safetyInitial.json()).paused, true, 'Le système doit démarrer en pause sécurisée.');
+  const safetyResume = await fetch(`${baseUrl}/api/safety/pause`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ paused: false }) });
+  assert.equal(safetyResume.status, 200);
+  assert.equal((await safetyResume.json()).paused, false);
+  const safetyPause = await fetch(`${baseUrl}/api/safety/pause`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ paused: true }) });
+  assert.equal(safetyPause.status, 200);
+  assert.equal((await safetyPause.json()).paused, true);
+
   const forbiddenOrigin = await fetch(`${baseUrl}/api/contacts`, {
     method: 'POST',
     headers: {
