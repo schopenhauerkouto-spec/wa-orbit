@@ -14,6 +14,7 @@ WA Orbit est une application monoposte de gestion de contacts et de conversation
 - Envoi manuel unitaire avec validation humaine, fenêtre de service de 24 h et modèles approuvés.
 - Détection des demandes STOP / ARRÊT / UNSUBSCRIBE.
 - Sessions persistantes PostgreSQL en déploiement, rate limits HTTP, cookies HttpOnly/SameSite, contrôle d'origine et Helmet.
+- Arrêt d'urgence persistant, activé par défaut sur les nouvelles installations, qui bloque les envois sortants et les réponses automatiques jusqu'à reprise manuelle.
 
 ## Stack
 
@@ -25,24 +26,24 @@ WA Orbit est une application monoposte de gestion de contacts et de conversation
 - Meta WhatsApp Cloud API
 - Groq Chat Completions (`openai/gpt-oss-20b` par défaut)
 
-## Déploiement Render + Supabase
+## Déploiement Cloudflare Workers (migration en cours)
 
-Le déploiement recommandé de démonstration est **Render Free + Supabase Free PostgreSQL**.
+Le projet comporte maintenant une première fondation Cloudflare dans `worker/` avec :
+- un endpoint de santé `/health` ;
+- la vérification Meta `GET /webhook` ;
+- la réception sécurisée des webhooks `POST /webhook` avec validation HMAC SHA-256 ;
+- le stockage idempotent des messages et statuts dans Cloudflare D1 ;
+- le service des fichiers statiques via Workers Assets.
 
-1. Crée un projet Supabase Free.
-2. Dans **Connect**, choisis **Session pooler** (IPv4, port 5432) et copie l'URI PostgreSQL. Remplace le marqueur du mot de passe par le vrai mot de passe de la base.
-3. Envoie les fichiers du dossier à un dépôt GitHub. N'ajoute jamais `.env`, une clé Meta, une clé Groq ou une URI PostgreSQL.
-4. Dans Render, choisis **New → Blueprint**, connecte le dépôt et laisse Render lire `render.yaml`.
-5. Renseigne les variables privées demandées, au minimum `DATABASE_URL` et `ADMIN_PASSWORD`. Le `SESSION_SECRET` est généré automatiquement.
-6. Déploie le service et vérifie `https://TON-SERVICE.onrender.com/health` : le statut doit être `ok` et le stockage doit être `postgres`.
-7. Configure le webhook Meta sur `https://TON-SERVICE.onrender.com/webhook`.
-8. Laisse `BOT_AUTO_REPLY_ENABLED=false` jusqu'à validation d'un message entrant réel.
+**Important : cette fondation n'est pas encore un déploiement complet de WA Orbit.** Les routes du tableau de bord `/api/*`, l'authentification, la gestion des contacts, les conversations, les contrôles de sécurité, l'envoi WhatsApp et Groq doivent encore être migrés. Tant que cette migration n'est pas terminée, le tableau de bord ne sera pas pleinement fonctionnel sur Cloudflare et les réponses automatiques restent désactivées.
 
-Voir [CONFIGURATION_RAPIDE.md](CONFIGURATION_RAPIDE.md) pour les étapes détaillées et les variables.
+Consulte [worker/README.md](worker/README.md) pour la préparation Cloudflare, D1, les secrets et le déploiement.
 
-### Avertissement sur les free tiers
+Le déploiement Render décrit dans l'historique reste une option Node.js/Express distincte ; il n'est pas nécessaire pour la voie Cloudflare.
 
-Render Free met le Web Service en veille après 15 minutes sans trafic entrant et peut prendre environ une minute pour le réveiller. Le système de fichiers local est éphémère ; les données et sessions sont donc placées dans PostgreSQL externe. Supabase Free peut mettre en pause un projet qui reçoit trop peu d'activité pendant une semaine. Cette configuration sert au prototypage et aux tests, pas à une disponibilité garantie 24/7.
+## Limites de déploiement
+
+Les offres gratuites des plateformes comportent des quotas et des limites susceptibles d'évoluer. Vérifie les quotas affichés dans ton compte Cloudflare avant la mise en production. Une disponibilité 24/7 et l'absence de coûts ne sont jamais garanties par un simple déploiement.
 
 ## Configuration locale
 

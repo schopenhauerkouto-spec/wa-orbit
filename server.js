@@ -62,7 +62,7 @@ if (process.env.DATABASE_URL) {
   const stored = await pool.query('SELECT payload FROM wa_orbit_state WHERE id = 1');
   if (stored.rowCount) db = stored.rows[0].payload;
   else {
-    db = { contacts: [], events: [], processedMessageIds: [], groqQuota: null };
+    db = { contacts: [], events: [], processedMessageIds: [], groqQuota: null, systemSafety: { paused: true, reason: 'Initialisation sécurisée', updatedAt: null } };
     await pool.query('INSERT INTO wa_orbit_state (id, payload) VALUES (1, $1::jsonb)', [JSON.stringify(db)]);
   }
   storageMode = 'postgres';
@@ -83,6 +83,8 @@ if (!Array.isArray(db.events)) db.events = [];
 if (!Array.isArray(db.processedMessageIds)) db.processedMessageIds = [];
 if (!db.groqQuota || typeof db.groqQuota !== 'object') db.groqQuota = null;
 if (!db.botUsage || typeof db.botUsage !== 'object') db.botUsage = null;
+if (!db.systemSafety || typeof db.systemSafety !== 'object') db.systemSafety = { paused: true, reason: 'Initialisation sécurisée', updatedAt: null };
+if (typeof db.systemSafety.paused !== 'boolean') db.systemSafety.paused = true;
 for (const contact of db.contacts) { if (!Array.isArray(contact.messages)) contact.messages = []; }
 let saveChain = Promise.resolve();
 function saveDb() {
@@ -301,7 +303,7 @@ function groqQuotaError(reason) {
   return error;
 }
 function autoReplyEnabled() {
-  return String(process.env.BOT_AUTO_REPLY_ENABLED || 'false').toLowerCase() === 'true';
+  return String(process.env.BOT_AUTO_REPLY_ENABLED || 'false').toLowerCase() === 'true' && !db.systemSafety?.paused;
 }
 function getBotUsage() {
   if (!db.botUsage) db.botUsage = { day: '', repliesToday: 0, byContactHour: {} };
@@ -639,6 +641,20 @@ app.get('/api/config', requireAuth, (req, res) => {
   });
 });
 
+app.get('/api/safety', requireAuth, (req, res) => res.json({ ...db.systemSafety }));
+app.post('/api/safety/pause', requireAuth, async (req, res) => {
+  const paused = req.body?.paused;
+  if (typeof paused !== 'boolean') return res.status(400).json({ error: 'Le champ paused doit être booléen.' });
+  db.systemSafety = {
+    paused,
+    reason: paused ? 'Pause manuelle administrateur' : 'Reprise manuelle administrateur',
+    updatedAt: new Date().toISOString()
+  };
+  addEvent({ kind: paused ? 'safety-paused' : 'safety-resumed', text: paused ? 'Arrêt d’urgence activé : les envois sortants et réponses automatiques sont suspendus.' : 'Reprise manuelle : les contrôles habituels restent obligatoires.' });
+  await saveDb();
+  res.json({ ok: true, ...db.systemSafety });
+});
+
 app.get('/api/groq/quota', requireAuth, (req, res) => res.json(groqQuotaStatus()));
 
 app.get('/api/contacts', requireAuth, (req, res) => res.json(db.contacts));
@@ -735,6 +751,7 @@ app.get('/api/events', requireAuth, (req, res) => res.json(db.events.slice(0, 20
 
 app.post('/api/messages/send', requireAuth, sendLimiter, async (req, res) => {
   const { contactId, mode, text, templateName, templateLanguage, approved } = req.body || {};
+  if (db.systemSafety?.paused) return res.status(423).json({ error: 'Arrêt d’urgence actif : les envois sont suspendus. Réactive le système depuis le tableau de bord après vérification.' });
   const contact = db.contacts.find(c => c.id === contactId);
   if (!contact) return res.status(404).json({ error: 'Contact introuvable.' });
   if (contact.blocked) return res.status(403).json({ error: 'Envoi bloqué : ce contact est bloqué ou a demandé l’arrêt.' });

@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check public/js/app.js && node --check tests/smoke.mjs",
+    "check": "node --check server.js && node --check public/js/app.js && node --check tests/smoke.mjs && node --check worker/src/index.js",
     "test:smoke": "node tests/smoke.mjs",
     "test": "npm run check && npm run test:smoke"
   },
