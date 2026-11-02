@@ -1,36 +1,48 @@
-# WA Orbit sur Cloudflare Workers — fondation
+# WA Orbit — Cloudflare Worker
 
-Cette première étape ajoute un Worker pour les routes de santé et le webhook Meta, ainsi qu'un schéma D1 idempotent pour les messages entrants et statuts.
+## Fonctionnalités de cette étape
+- Webhook Meta vérifié par signature HMAC SHA-256 et stockage idempotent des messages/statuts.
+- Contacts importables en JSON, avec normalisation et validation des numéros.
+- Consentement explicite suivi par contact : `unknown`, `opted_in`, `opted_out`.
+- Sélection quotidienne plafonnée à 5 contacts, uniquement avec consentement `opted_in`.
+- Anti-doublon quotidien via `wa_daily_selections`.
+- Cooldown de 30 jours après enregistrement d'un envoi, configurable côté base entre 1 et 365 jours.
+- Exclusion des conversations actives de la sélection de nouvelles prises de contact.
+- Opt-out immédiat, pause d'urgence persistante.
+- API protégée par `ADMIN_API_TOKEN`.
 
-## Ce qui fonctionne dans cette fondation
-- `GET /health` vérifie la liaison D1.
-- `GET /webhook` effectue le challenge de vérification Meta.
-- `POST /webhook` vérifie obligatoirement la signature HMAC SHA-256 Meta avant de parser le JSON.
-- Les messages entrants sont enregistrés dans D1 avec `message_id` comme clé primaire (les doublons sont ignorés).
-- Les statuts de livraison sont enregistrés et actualisés.
-- Les fichiers statiques du dossier `public/` sont servis par le binding Assets.
+## API admin
+Toutes les routes `/api/*` exigent `Authorization: Bearer <ADMIN_API_TOKEN>`.
 
-## Ce qui n'est PAS encore migré
-Les routes `/api/*` du tableau de bord, l'authentification admin, les sessions, les contacts, les imports, les conversations, l'arrêt d'urgence, l'envoi WhatsApp et l'intégration Groq ne sont pas encore portés vers Workers/D1. Ces routes répondent volontairement `501` afin de ne pas laisser croire que le tableau de bord est opérationnel alors que son API ne l'est pas.
+- `GET /api/safety`
+- `POST /api/safety/pause` avec `{"paused":true}` ou `{"paused":false}`
+- `GET /api/contacts`
+- `POST /api/contacts/import` avec `{"contacts":[{"phone":"+2250700000000","name":"Nom"}]}`
+- `GET /api/contacts/daily-selection`
+- `POST /api/contacts/:id/action` avec `{"action":"opt_in","consent_source":"..."}`
+- Actions supplémentaires : `opt_out`, `sent`, `conversation_active`, `conversation_closed`.
 
-Le frontend actuel dépend de ces routes : le site ne doit donc pas être présenté comme prêt à l'utilisation après ce seul déploiement.
+## Règles anti-répétition
+Un contact envoyé aujourd'hui est marqué comme contacté et reçoit une date `cooldown_until` à J+30. Il ne revient pas dans les sélections avant cette date. Les doublons du jour sont bloqués par clé primaire. Les contacts en conversation active sont écartés des nouvelles prises de contact. Les réponses entrantes du webhook actualisent l'interaction et placent la conversation en état actif.
 
-## Préparation Cloudflare
-1. Créer une base D1 nommée `wa-orbit-db`.
-2. Remplacer `database_id` dans `wrangler.toml` par l'identifiant fourni par Cloudflare.
-3. Installer Wrangler localement : `npm install -D wrangler`.
-4. Appliquer le schéma : `npx wrangler d1 migrations apply wa-orbit-db --remote`.
-5. Définir les secrets via Wrangler (jamais dans Git) :
+## Important — limites d'envoi
+Cette étape fournit le moteur de contacts, de sélection et de suivi. Elle ne déclenche pas d'envoi WhatsApp automatique. L'envoi doit être raccordé à l'API officielle Meta, avec les règles de consentement, modèles approuvés hors fenêtre de service et fenêtre de 24 heures. Aucun mécanisme de contournement anti-spam n'est intégré. Le système reste en pause au démarrage.
+
+## Déploiement
+1. Créer/choisir la base D1 `wa-orbit-db`.
+2. Remplacer `database_id` dans `wrangler.toml`.
+3. Appliquer les migrations : `npx wrangler d1 migrations apply wa-orbit-db --remote`.
+4. Définir les secrets :
    - `npx wrangler secret put WHATSAPP_APP_SECRET`
    - `npx wrangler secret put WHATSAPP_VERIFY_TOKEN`
-6. Déployer : `npx wrangler deploy`.
-7. Configurer le webhook Meta vers `https://<nom-du-worker>.<compte>.workers.dev/webhook`.
+   - `npx wrangler secret put ADMIN_API_TOKEN`
+5. Déployer : `npx wrangler deploy`.
+6. Configurer le webhook Meta sur `https://<worker>/webhook`.
 
-## Tests
+## Vérification
+- `npm test`
 - `node --check worker/src/index.js`
-- Vérifier `/health` après liaison D1.
-- Tester le challenge Meta.
-- Vérifier le rejet d'une signature absente/incorrecte.
-- Envoyer deux fois le même événement et confirmer l'idempotence dans D1.
+- `GET /health` doit répondre `status: ok` après migration et liaison D1.
+- Tester l'authentification, l'import, le quota, le cooldown, l'opt-out et l'idempotence webhook.
 
-Ne jamais activer les réponses automatiques avant migration complète des règles de consentement, du STOP, de la fenêtre 24 h, des plafonds et de l'arrêt d'urgence.
+La migration Cloudflare ne remplace pas la base Supabase DIGIT+ déjà préparée. Cette branche utilise D1 pour que le Worker puisse fonctionner sans exposer de clé privilégiée dans le navigateur.
