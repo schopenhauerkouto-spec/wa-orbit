@@ -65,6 +65,8 @@ try {
 
   const unauthenticated = await fetch(`${baseUrl}/api/contacts`);
   assert.equal(unauthenticated.status, 401, 'Les routes privées doivent refuser une session absente.');
+  const unauthenticatedSafety = await fetch(`${baseUrl}/api/safety`);
+  assert.equal(unauthenticatedSafety.status, 401, 'Le statut de sécurité doit rester privé.');
 
   const challengeUrl = new URL('/webhook', baseUrl);
   challengeUrl.searchParams.set('hub.mode', 'subscribe');
@@ -131,6 +133,8 @@ try {
   const safetyInitial = await fetch(`${baseUrl}/api/safety`, { headers: { cookie } });
   assert.equal(safetyInitial.status, 200);
   assert.equal((await safetyInitial.json()).paused, true, 'Le système doit démarrer en pause sécurisée.');
+  const emergencyBlockedSend = await fetch(`${baseUrl}/api/messages/send`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ contactId: 'not-used', mode: 'text', text: 'Test', approved: true }) });
+  assert.equal(emergencyBlockedSend.status, 423, 'L’arrêt d’urgence doit bloquer tout envoi sortant avant les autres vérifications.');
   const safetyResume = await fetch(`${baseUrl}/api/safety/pause`, { method: 'POST', headers: { 'content-type': 'application/json', cookie }, body: JSON.stringify({ paused: false }) });
   assert.equal(safetyResume.status, 200);
   assert.equal((await safetyResume.json()).paused, false);
