@@ -72,8 +72,8 @@ async function handleWebhook(request, env) {
           text(message.type || "unknown", 40), text(body, 1200), receivedAt, JSON.stringify(message)));
         // Inbound replies update the contact's last interaction and reopen its conversation.
         statements.push(env.DB.prepare(
-          "INSERT INTO wa_contacts (phone, display_name, consent_status, created_at, updated_at) VALUES (?, ?, 'unknown', ?, ?) ON CONFLICT(phone) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE wa_contacts.display_name END, updated_at=excluded.updated_at"
-        ).bind(phone, text(sender?.profile?.name, 100), receivedAt, receivedAt));
+          "INSERT INTO wa_contacts (id, phone, display_name, consent_status, created_at, updated_at) VALUES (?, ?, ?, 'unknown', ?, ?) ON CONFLICT(phone) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE wa_contacts.display_name END, updated_at=excluded.updated_at"
+        ).bind(crypto.randomUUID(), phone, text(sender?.profile?.name, 100), receivedAt, receivedAt));
         statements.push(env.DB.prepare(
           "UPDATE wa_contacts SET last_interaction_at = ?, conversation_state = 'active', updated_at = ? WHERE phone = ?"
         ).bind(receivedAt, receivedAt, phone));
@@ -113,8 +113,8 @@ async function importContacts(request, env) {
     const phone = normalizePhone(item.phone);
     if (!validPhone(phone)) { rejected++; continue; }
     statements.push(env.DB.prepare(
-      "INSERT INTO wa_contacts (phone, display_name, consent_status, created_at, updated_at) VALUES (?, ?, 'unknown', ?, ?) ON CONFLICT(phone) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE wa_contacts.display_name END, updated_at=excluded.updated_at"
-    ).bind(phone, text(item.name || item.display_name, 100), now, now));
+      "INSERT INTO wa_contacts (id, phone, display_name, consent_status, created_at, updated_at) VALUES (?, ?, ?, 'unknown', ?, ?) ON CONFLICT(phone) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE wa_contacts.display_name END, updated_at=excluded.updated_at"
+    ).bind(crypto.randomUUID(), phone, text(item.name || item.display_name, 100), now, now));
   }
   if (statements.length) await env.DB.batch(statements);
   return json({ imported_or_updated: statements.length, rejected, consent_default: "unknown" }, 201);
