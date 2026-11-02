@@ -14,6 +14,7 @@ WA Orbit est une application monoposte de gestion de contacts et de conversation
 - Envoi manuel unitaire avec validation humaine, fenêtre de service de 24 h et modèles approuvés.
 - Détection des demandes STOP / ARRÊT / UNSUBSCRIBE.
 - Sessions persistantes PostgreSQL en déploiement, rate limits HTTP, cookies HttpOnly/SameSite, contrôle d'origine et Helmet.
+- Arrêt d'urgence persistant, activé par défaut sur les nouvelles installations, qui bloque les envois sortants et les réponses automatiques jusqu'à reprise manuelle.
 
 ## Stack
 
