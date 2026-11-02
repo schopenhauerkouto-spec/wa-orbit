@@ -516,7 +516,7 @@ app.post('/webhook', express.raw({ type: 'application/json', limit: '2mb' }), as
             db.processedMessageIds = db.processedMessageIds.slice(-10000);
           }
           const sender = (value.contacts || []).find(item =>
-            normalizePhone(item?.wa_id || '').replace(/^\\+/, '') === phone.replace(/^\\+/, '')
+            normalizePhone(item?.wa_id || '').replace(/^\+/, '') === phone.replace(/^\+/, '')
           );
           const senderName = shortText(sender?.profile?.name || '', 100);
           let contact = findContactByPhone(phone);
