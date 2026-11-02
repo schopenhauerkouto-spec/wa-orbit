@@ -94,8 +94,46 @@
       </section>
 
       <section id="page-inbox" class="page">
-        <div class="page-heading"><p class="eyebrow">CENTRE DE CONVERSATION</p><h1>La boîte de <span>réception.</span></h1><p class="muted">Les messages reçus, réponses automatiques du bot et événements WhatsApp remontent ici via le webhook Meta.</p></div>
-        <div class="inbox-layout"><div class="panel inbox-list-panel"><div class="panel-heading"><div><p class="eyebrow">FLUX ENTRANT</p><h3>Activité récente</h3></div><button id="refreshEventsBtn" class="icon-btn" title="Actualiser">↻</button></div><div id="inboxEvents" class="event-list"><div class="empty-state"><span>▤</span><strong>Aucune conversation reçue</strong><p>Configure le webhook Meta pour recevoir les réponses.</p></div></div></div><div class="panel inbox-info-panel"><div class="inbox-illustration">▤</div><p class="eyebrow">RÈGLE DE CONVERSATION</p><h3>Une réponse change tout.</h3><p>Dès qu’un contact t’écrit, Orbit marque la conversation comme démarrée et bloque toute nouvelle sollicitation de campagne. Tu peux toutefois répondre manuellement dans la fenêtre de service de 24 heures.</p><div class="rule-chip"><span>✓</span> Pas de relance automatique après réponse</div><div class="rule-chip"><span>✓</span> Demande STOP = blocage immédiat</div></div></div>
+        <div class="page-heading">
+          <p class="eyebrow">CENTRE DE CONVERSATION</p>
+          <h1>La boîte de <span>réception.</span></h1>
+          <p class="muted">Retrouve les échanges entrants, consulte leur historique et réponds manuellement dans la fenêtre de service.</p>
+        </div>
+        <div class="inbox-layout">
+          <aside class="panel inbox-list-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">TES CONVERSATIONS</p><h3>Messages récents</h3></div>
+              <button id="refreshEventsBtn" class="icon-btn" type="button" title="Actualiser" aria-label="Actualiser les conversations">↻</button>
+            </div>
+            <label class="search-box conversation-search" for="conversationSearch"><span>⌕</span><input id="conversationSearch" type="search" placeholder="Rechercher un contact…" autocomplete="off"></label>
+            <div id="conversationList" class="conversation-list" aria-label="Liste des conversations">
+              <div class="empty-state compact"><span>▤</span><strong>Aucune conversation</strong><p>Les messages entrants apparaîtront ici après réception par le webhook.</p></div>
+            </div>
+          </aside>
+          <section class="panel conversation-panel" aria-label="Conversation sélectionnée">
+            <div id="conversationHeader" class="conversation-header">
+              <div><strong>Aucune conversation sélectionnée</strong><small>Choisis une conversation dans la colonne de gauche.</small></div>
+            </div>
+            <div id="conversationMessages" class="conversation-messages" role="log" aria-live="polite">
+              <div class="empty-state"><span>✉</span><strong>Ta boîte de réception est prête</strong><p>Les échanges s’afficheront ici dès qu’un contact t’écrira.</p></div>
+            </div>
+            <form id="conversationReplyForm" class="conversation-composer">
+              <p id="conversationPolicy" class="helper-box">Une réponse libre est possible pendant les 24 heures qui suivent le dernier message entrant.</p>
+              <label for="conversationReplyText">Ta réponse</label>
+              <textarea id="conversationReplyText" rows="3" maxlength="4096" placeholder="Écris une réponse utile et personnalisée…" disabled></textarea>
+              <div class="conversation-compose-foot">
+                <span id="conversationCharCount" class="field-hint">0 / 4096</span>
+                <label class="consent-confirm"><input id="conversationApproval" type="checkbox" required disabled><span>J’ai vérifié le destinataire et le contenu.</span></label>
+                <button class="btn btn-primary" type="submit" disabled>Envoyer la réponse</button>
+              </div>
+              <p id="conversationReplyFeedback" class="form-feedback" role="status"></p>
+            </form>
+          </section>
+        </div>
+        <article class="panel inbox-activity-panel">
+          <div class="panel-heading"><div><p class="eyebrow">JOURNAL</p><h3>Derniers événements WhatsApp</h3></div></div>
+          <div id="inboxEvents" class="event-list"><div class="empty-state compact"><span>◷</span><strong>Pas encore d’activité</strong><p>Les événements apparaîtront ici.</p></div></div>
+        </article>
       </section>
 
       <section id="page-campaigns" class="page">
