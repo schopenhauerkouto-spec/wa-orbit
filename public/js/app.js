@@ -1,4 +1,4 @@
-const state = { contacts: [], events: [], config: null, currentPage: 'overview' };
+const state = { contacts: [], events: [], config: null, currentPage: 'overview', selectedConversationId: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -69,6 +69,7 @@ function showPage(page) {
   $('#breadcrumbCurrent').textContent = labels[page] || 'Accueil';
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (page === 'campaigns') renderRecipientOptions();
+  if (page === 'inbox') renderInbox();
 }
 
 async function loadData() {
@@ -85,6 +86,7 @@ function renderAll() {
   renderOverview();
   renderContacts();
   renderEvents();
+  renderInbox();
   renderRecipientOptions();
   renderSettings();
 }
@@ -194,6 +196,126 @@ function renderRecipientOptions() {
   select.innerHTML = `<option value="">Choisir un contact autorisé…</option>` + contacts.map(c => `<option value="${c.id}">${escapeHtml(c.name)} · ${escapeHtml(c.phone)}</option>`).join('');
   if (contacts.some(c => c.id === previous)) select.value = previous;
   updateRecipientHint();
+}
+
+
+function conversationLastMessage(contact) {
+  const messages = Array.isArray(contact?.messages) ? contact.messages : [];
+  return messages.length ? messages[messages.length - 1] : null;
+}
+function conversationTimestamp(contact) {
+  const lastMessage = conversationLastMessage(contact);
+  const value = lastMessage?.at || contact?.lastInboundAt || contact?.updatedAt || contact?.createdAt;
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+function renderInbox() {
+  const search = ($('#conversationSearch')?.value || '').toLowerCase().trim();
+  const conversations = state.contacts
+    .filter(contact => contact.conversationStarted || (Array.isArray(contact.messages) && contact.messages.length > 0))
+    .sort((a, b) => conversationTimestamp(b) - conversationTimestamp(a));
+  const visible = conversations.filter(contact =>
+    !search || `${contact.name || ''} ${contact.phone || ''}`.toLowerCase().includes(search)
+  );
+  if (!visible.some(contact => contact.id === state.selectedConversationId)) {
+    state.selectedConversationId = visible[0]?.id || null;
+  }
+  const list = $('#conversationList');
+  if (!list) return;
+  if (!visible.length) {
+    list.innerHTML = '<div class="empty-state compact"><span>▤</span><strong>Aucune conversation</strong><p>Les messages entrants apparaîtront ici après réception par le webhook.</p></div>';
+  } else {
+    list.innerHTML = visible.map(contact => {
+      const last = conversationLastMessage(contact);
+      const preview = last?.content || 'Conversation démarrée';
+      const isOpen = within24h(contact.lastInboundAt);
+      return `<button type="button" class="conversation-item ${contact.id === state.selectedConversationId ? 'active' : ''}" data-thread-id="${escapeHtml(contact.id)}" aria-pressed="${contact.id === state.selectedConversationId}">
+        <span class="conversation-avatar">${escapeHtml(initials(contact.name))}</span>
+        <span class="conversation-item-copy"><strong>${escapeHtml(contact.name || contact.phone)}</strong><small>${escapeHtml(contact.phone)}</small><span>${escapeHtml(preview)}</span></span>
+        <span class="conversation-item-meta"><time>${escapeHtml(formatTime(last?.at || contact.lastInboundAt))}</time><i class="${isOpen ? 'window-open' : 'window-closed'}" title="${isOpen ? 'Fenêtre de 24 h ouverte' : 'Fenêtre de 24 h fermée'}"></i></span>
+      </button>`;
+    }).join('');
+  }
+  renderConversation();
+}
+function renderConversation() {
+  const contact = state.contacts.find(item => item.id === state.selectedConversationId);
+  const header = $('#conversationHeader');
+  const messagesNode = $('#conversationMessages');
+  const policy = $('#conversationPolicy');
+  const input = $('#conversationReplyText');
+  const approval = $('#conversationApproval');
+  const submit = $('#conversationReplyForm button[type="submit"]');
+  if (!header || !messagesNode || !policy || !input || !approval || !submit) return;
+
+  if (!contact) {
+    header.innerHTML = '<div><strong>Aucune conversation sélectionnée</strong><small>Choisis une conversation dans la colonne de gauche.</small></div>';
+    messagesNode.innerHTML = '<div class="empty-state"><span>✉</span><strong>Ta boîte de réception est prête</strong><p>Les échanges s’afficheront ici dès qu’un contact t’écrira.</p></div>';
+    policy.textContent = 'Une réponse libre est possible pendant les 24 heures qui suivent le dernier message entrant.';
+    input.disabled = true;
+    approval.disabled = true;
+    submit.disabled = true;
+    return;
+  }
+
+  const isOpen = within24h(contact.lastInboundAt);
+  const blocked = Boolean(contact.blocked);
+  header.innerHTML = `<div class="conversation-person"><span class="conversation-avatar large">${escapeHtml(initials(contact.name))}</span><span><strong>${escapeHtml(contact.name || contact.phone)}</strong><small>${escapeHtml(contact.phone)}</small></span></div><span class="thread-window ${isOpen && !blocked ? 'open' : 'closed'}">${blocked ? 'Contact bloqué' : isOpen ? 'Fenêtre 24 h ouverte' : 'Fenêtre 24 h fermée'}</span>`;
+
+  const messages = Array.isArray(contact.messages) ? contact.messages : [];
+  messagesNode.innerHTML = messages.length ? messages.map(message => {
+    const role = message.role === 'user' ? 'incoming' : 'outgoing';
+    const label = role === 'incoming' ? 'Contact' : 'WA Orbit / Admin';
+    const body = escapeHtml(message.content || '').replace(/\n/g, '<br>');
+    return `<article class="message-bubble ${role}"><small>${label}</small><p>${body}</p><time>${escapeHtml(formatTime(message.at))}</time></article>`;
+  }).join('') : '<div class="empty-state compact"><span>✉</span><strong>Pas encore de message affichable</strong><p>Le contact a démarré une conversation, mais aucun contenu texte n’est disponible.</p></div>';
+  messagesNode.scrollTop = messagesNode.scrollHeight;
+
+  input.disabled = blocked || !isOpen;
+  approval.disabled = blocked || !isOpen;
+  submit.disabled = blocked || !isOpen;
+  policy.textContent = blocked
+    ? 'Envoi impossible : ce contact a demandé l’arrêt ou a été bloqué.'
+    : isOpen
+      ? 'Fenêtre de service ouverte : tu peux répondre librement à ce contact. Une validation humaine reste obligatoire.'
+      : 'Fenêtre de 24 h fermée : la réponse libre est désactivée. Pour un message hors fenêtre, utilise un modèle approuvé et vérifie le consentement dans la rubrique Messages.';
+}
+async function handleConversationReply(event) {
+  event.preventDefault();
+  const contact = state.contacts.find(item => item.id === state.selectedConversationId);
+  const feedback = $('#conversationReplyFeedback');
+  const input = $('#conversationReplyText');
+  const approval = $('#conversationApproval');
+  const submit = $('#conversationReplyForm button[type="submit"]');
+  if (!contact) { feedback.textContent = 'Sélectionne une conversation.'; return; }
+  if (contact.blocked) { feedback.textContent = 'Ce contact est bloqué.'; return; }
+  if (!within24h(contact.lastInboundAt)) { feedback.textContent = 'La fenêtre de 24 h est fermée. Utilise un modèle approuvé si les conditions sont réunies.'; return; }
+  const text = input.value.trim();
+  if (!text) { feedback.textContent = 'Écris une réponse avant de l’envoyer.'; return; }
+  if (!approval.checked) { feedback.textContent = 'Confirme la vérification du destinataire et du message.'; return; }
+
+  feedback.textContent = '';
+  submit.disabled = true;
+  submit.textContent = 'Envoi en cours…';
+  try {
+    const result = await api('/api/messages/send', {
+      method: 'POST',
+      body: JSON.stringify({ contactId: contact.id, mode: 'text', text, approved: true })
+    });
+    input.value = '';
+    approval.checked = false;
+    $('#conversationCharCount').textContent = '0 / 4096';
+    feedback.style.color = '#2b9669';
+    feedback.textContent = `Message accepté par Meta. Référence : ${result.messageId || 'non fournie'}`;
+    await loadData();
+    toast('Réponse envoyée.');
+  } catch (error) {
+    feedback.style.color = '#c06c59';
+    feedback.textContent = error.message;
+  } finally {
+    submit.disabled = !within24h(contact.lastInboundAt) || contact.blocked;
+    submit.textContent = 'Envoyer la réponse';
+  }
 }
 
 function renderSettings() {
@@ -413,8 +535,25 @@ function bindEvents() {
     if (pageButton) { event.preventDefault(); showPage(pageButton.dataset.page); return; }
     const closeButton = event.target.closest('[data-close-dialog]');
     if (closeButton) { document.getElementById(closeButton.dataset.closeDialog)?.close(); return; }
+    const threadButton = event.target.closest('[data-thread-id]');
+    if (threadButton) {
+      if (state.selectedConversationId !== threadButton.dataset.threadId) {
+        state.selectedConversationId = threadButton.dataset.threadId;
+        $('#conversationReplyText').value = '';
+        $('#conversationApproval').checked = false;
+        $('#conversationReplyFeedback').textContent = '';
+        $('#conversationCharCount').textContent = '0 / 4096';
+      }
+      renderInbox();
+      return;
+    }
     const actionButton = event.target.closest('[data-action]');
     if (actionButton) handleContactAction(actionButton);
+  });
+  $('#conversationSearch').addEventListener('input', renderInbox);
+  $('#conversationReplyForm').addEventListener('submit', handleConversationReply);
+  $('#conversationReplyText').addEventListener('input', () => {
+    $('#conversationCharCount').textContent = `${$('#conversationReplyText').value.length} / 4096`;
   });
   $('#contactSearch').addEventListener('input', renderContacts);
   $('#contactFilter').addEventListener('change', renderContacts);

@@ -15,7 +15,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'db.json');
 const { Pool } = pg;
 let db;
@@ -435,7 +435,7 @@ async function handleIncomingAutoReply({ contact, text, messageId, messageType, 
     const note = 'J’ai bien reçu ton message. Pour le moment, je peux traiter les messages écrits : décris-moi ta demande en quelques mots 😊';
     const sentId = await sendWhatsAppText(contact.phone, note);
     contact.messages.push({ role: 'assistant', content: note, at: new Date().toISOString() });
-    contact.messages = contact.messages.slice(-12);
+    contact.messages = contact.messages.slice(-40);
     contact.lastOutboundAt = new Date().toISOString();
     addEvent({ kind: 'bot-reply', phone: contact.phone, text: note, messageId: sentId, inReplyTo: messageId });
     await saveDb();
@@ -451,7 +451,7 @@ async function handleIncomingAutoReply({ contact, text, messageId, messageType, 
   }
   const sentId = await sendWhatsAppText(contact.phone, reply);
   contact.messages.push({ role: 'assistant', content: reply, at: new Date().toISOString() });
-  contact.messages = contact.messages.slice(-12);
+  contact.messages = contact.messages.slice(-40);
   contact.lastOutboundAt = new Date().toISOString();
   addEvent({ kind: 'bot-reply', phone: contact.phone, text: reply, messageId: sentId, inReplyTo: messageId });
   await saveDb();
@@ -537,7 +537,7 @@ app.post('/webhook', express.raw({ type: 'application/json', limit: '2mb' }), as
           const historyBeforeMessage = contact.messages.slice(-6).map(item => ({ role: item.role, content: shortText(item.content, 700) }));
           if (text) {
             contact.messages.push({ role: 'user', content: shortText(text, 1200), at: contact.lastInboundAt });
-            contact.messages = contact.messages.slice(-12);
+            contact.messages = contact.messages.slice(-40);
           }
           const stopWords = /^(stop|arr[eê]t|unsubscribe|unsub|cancel|annule|d[eé]sabonn(?:e|ement)|d[eé]sinscri(?:s|re|ption)|ne plus m.{0,8}ecrire|ne me contactez plus)[\s.!?]*$/i;
           if (stopWords.test(text.trim())) {
@@ -762,11 +762,17 @@ app.post('/api/messages/send', requireAuth, sendLimiter, async (req, res) => {
       await saveDb();
       return res.status(response.status).json({ error: result?.error?.message || 'Meta a refusé l’envoi.', details: result?.error?.error_data?.details || null });
     }
-    contact.lastOutboundAt = new Date().toISOString();
-    if (mode === 'template') contact.initialTemplateSentAt = contact.initialTemplateSentAt || contact.lastOutboundAt;
+    const sentAt = new Date().toISOString();
+    const sentMessageId = result?.messages?.[0]?.id || null;
+    const outboundText = mode === 'text' ? String(text).trim() : `Modèle WhatsApp envoyé : ${templateName}`;
+    contact.lastOutboundAt = sentAt;
+    if (mode === 'template') contact.initialTemplateSentAt = contact.initialTemplateSentAt || sentAt;
     contact.stage = contact.conversationStarted ? 'conversation' : 'contacted';
-    contact.updatedAt = new Date().toISOString();
-    addEvent({ kind: 'sent', phone: contact.phone, text: mode === 'text' ? String(text).trim() : `Modèle envoyé : ${templateName}`, messageId: result?.messages?.[0]?.id || null });
+    contact.updatedAt = sentAt;
+    contact.messages = Array.isArray(contact.messages) ? contact.messages : [];
+    contact.messages.push({ role: 'assistant', content: outboundText, at: sentAt, messageId: sentMessageId });
+    contact.messages = contact.messages.slice(-40);
+    addEvent({ kind: 'sent', phone: contact.phone, text: outboundText, messageId: sentMessageId });
     await saveDb();
     return res.json({ ok: true, messageId: result?.messages?.[0]?.id || null, meta: result });
   } catch (error) {
