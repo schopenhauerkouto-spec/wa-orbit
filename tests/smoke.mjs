@@ -74,19 +74,47 @@ try {
   assert.equal(challenge.status, 200);
   assert.equal(await challenge.text(), 'orbit-challenge');
 
-  const webhookBody = JSON.stringify({ object: 'whatsapp_business_account', entry: [] });
-  const signature = `sha256=${createHmac('sha256', APP_SECRET).update(webhookBody).digest('hex')}`;
-  const acceptedWebhook = await fetch(`${baseUrl}/webhook`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-hub-signature-256': signature },
-    body: webhookBody
-  });
-  assert.equal(acceptedWebhook.status, 200, 'Un webhook signé doit être accepté.');
+  async function postSignedWebhook(payload) {
+    const body = JSON.stringify(payload);
+    const signature = `sha256=${createHmac('sha256', APP_SECRET).update(body).digest('hex')}`;
+    return fetch(`${baseUrl}/webhook`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': signature },
+      body
+    });
+  }
+  const incomingMessageId = 'wamid.WAOrbitSmoke001';
+  const incomingPayload = {
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: 'WABA_SMOKE',
+      changes: [{
+        field: 'messages',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '+15550000000', phone_number_id: 'PHONE_SMOKE' },
+          contacts: [{ profile: { name: 'Contact Webhook Smoke' }, wa_id: '2250700000003' }],
+          messages: [{
+            from: '2250700000003',
+            id: incomingMessageId,
+            timestamp: String(Math.floor(Date.now() / 1000)),
+            type: 'text',
+            text: { body: 'Bonjour depuis le test WA Orbit' }
+          }]
+        }
+      }]
+    }]
+  };
+  const acceptedWebhook = await postSignedWebhook(incomingPayload);
+  assert.equal(acceptedWebhook.status, 200, 'Un webhook entrant signé doit être accepté.');
+
+  const duplicateWebhook = await postSignedWebhook(incomingPayload);
+  assert.equal(duplicateWebhook.status, 200, 'Une livraison dupliquée doit être acquittée sans erreur.');
 
   const rejectedWebhook = await fetch(`${baseUrl}/webhook`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: webhookBody
+    body: JSON.stringify(incomingPayload)
   });
   assert.equal(rejectedWebhook.status, 401, 'Un webhook non signé doit être rejeté.');
 
@@ -143,7 +171,29 @@ try {
   const listed = await fetch(`${baseUrl}/api/contacts`, { headers: { cookie } });
   assert.equal(listed.status, 200);
   const contacts = await listed.json();
-  assert.equal(contacts.length, 2);
+  assert.equal(contacts.length, 3);
+  const inboundContact = contacts.find(item => item.phone === '2250700000003');
+  assert.ok(inboundContact, 'Le webhook doit créer automatiquement un contact entrant.');
+  assert.equal(inboundContact.optedIn, false, 'Un contact qui écrit n’est pas implicitement opt-in aux campagnes.');
+  assert.equal(inboundContact.messages.length, 1, 'Le message entrant doit être conservé une seule fois malgré une livraison dupliquée.');
+  assert.equal(inboundContact.messages[0].role, 'user');
+  assert.equal(inboundContact.messages[0].content, 'Bonjour depuis le test WA Orbit');
+
+  const stopPayload = structuredClone(incomingPayload);
+  stopPayload.entry[0].changes[0].value.messages[0] = {
+    from: '2250700000003',
+    id: 'wamid.WAOrbitSmokeSTOP',
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    type: 'text',
+    text: { body: 'STOP' }
+  };
+  const stopWebhook = await postSignedWebhook(stopPayload);
+  assert.equal(stopWebhook.status, 200);
+  const afterStopResponse = await fetch(`${baseUrl}/api/contacts`, { headers: { cookie } });
+  const afterStop = await afterStopResponse.json();
+  const stoppedContact = afterStop.find(item => item.phone === '2250700000003');
+  assert.equal(stoppedContact.blocked, true, 'STOP doit bloquer immédiatement les réponses automatiques et les envois.');
+  assert.equal(stoppedContact.optedIn, false, 'STOP doit retirer le consentement.');
 
   console.log('WA Orbit smoke tests : OK');
 } finally {
