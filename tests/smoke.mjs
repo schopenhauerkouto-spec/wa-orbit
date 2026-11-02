@@ -174,6 +174,7 @@ try {
   assert.equal(contacts.length, 3);
   const inboundContact = contacts.find(item => item.phone === '2250700000003');
   assert.ok(inboundContact, 'Le webhook doit créer automatiquement un contact entrant.');
+  assert.equal(inboundContact.name, 'Contact Webhook Smoke', 'Le nom WhatsApp fourni par Meta doit être utilisé.');
   assert.equal(inboundContact.optedIn, false, 'Un contact qui écrit n’est pas implicitement opt-in aux campagnes.');
   assert.equal(inboundContact.messages.length, 1, 'Le message entrant doit être conservé une seule fois malgré une livraison dupliquée.');
   assert.equal(inboundContact.messages[0].role, 'user');
@@ -194,6 +195,26 @@ try {
   const stoppedContact = afterStop.find(item => item.phone === '2250700000003');
   assert.equal(stoppedContact.blocked, true, 'STOP doit bloquer immédiatement les réponses automatiques et les envois.');
   assert.equal(stoppedContact.optedIn, false, 'STOP doit retirer le consentement.');
+
+  const mediaPayload = structuredClone(incomingPayload);
+  mediaPayload.entry[0].changes[0].value.contacts[0].wa_id = '2250700000004';
+  mediaPayload.entry[0].changes[0].value.contacts[0].profile.name = 'Contact Media Smoke';
+  mediaPayload.entry[0].changes[0].value.messages[0] = {
+    from: '2250700000004',
+    id: 'wamid.WAOrbitSmokeMEDIA',
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    type: 'image',
+    image: { mime_type: 'image/jpeg', sha256: 'smoke', id: 'MEDIA_SMOKE' }
+  };
+  const mediaWebhook = await postSignedWebhook(mediaPayload);
+  assert.equal(mediaWebhook.status, 200);
+  const afterMediaResponse = await fetch(`${baseUrl}/api/contacts`, { headers: { cookie } });
+  const afterMedia = await afterMediaResponse.json();
+  const mediaContact = afterMedia.find(item => item.phone === '2250700000004');
+  assert.ok(mediaContact, 'Un message média doit créer une conversation.');
+  assert.equal(mediaContact.name, 'Contact Media Smoke');
+  assert.equal(mediaContact.messages.length, 1);
+  assert.equal(mediaContact.messages[0].content, '[Message image reçu]', 'Les messages non textuels doivent apparaître dans l’historique.');
 
   console.log('WA Orbit smoke tests : OK');
 } finally {
