@@ -88,6 +88,23 @@ if (!db.systemSafety || typeof db.systemSafety !== 'object') db.systemSafety = {
 if (!db.baileysConnector || typeof db.baileysConnector !== 'object') {
   db.baileysConnector = { connected: false, canDeleteMessages: false, userId: '', lastHeartbeatAt: null };
 }
+if (!db.baileysSetup || typeof db.baileysSetup !== 'object') {
+  db.baileysSetup = {
+    mode: 'qr',
+    pairingNumber: '',
+    resetRequestedAt: null,
+    updatedAt: null
+  };
+}
+const baileysLive = {
+  status: 'idle',
+  qrDataUrl: '',
+  pairingCode: '',
+  lastQrAt: null,
+  lastPairingAt: null,
+  lastError: null,
+  connectedAt: null
+};
 if (typeof db.systemSafety.paused !== 'boolean') db.systemSafety.paused = true;
 db.groupModeration = normalizeGroupModerationPolicy(db.groupModeration || defaultGroupModerationPolicy());
 for (const contact of db.contacts) { if (!Array.isArray(contact.messages)) contact.messages = []; }
@@ -668,20 +685,47 @@ app.post('/api/safety/pause', requireAuth, async (req, res) => {
   res.json({ ok: true, ...db.systemSafety });
 });
 
+function baileysControlSnapshot() {
+  const state = db.baileysConnector || {};
+  const setup = db.baileysSetup || {};
+  return {
+    mode: setup.mode === 'pairing' ? 'pairing' : 'qr',
+    pairingNumber: setup.pairingNumber || '',
+    updatedAt: setup.updatedAt || null,
+    status: baileysLive.status,
+    qrDataUrl: baileysLive.qrDataUrl || '',
+    pairingCode: baileysLive.pairingCode || '',
+    lastQrAt: baileysLive.lastQrAt || null,
+    lastPairingAt: baileysLive.lastPairingAt || null,
+    lastError: baileysLive.lastError || null,
+    connectedAt: baileysLive.connectedAt || null,
+    connectorConnected: state.connected === true,
+    canDeleteMessages: state.canDeleteMessages === true,
+    liveEnforcement: state.connected === true &&
+      state.canDeleteMessages === true &&
+      process.env.BAILEYS_GROUP_ENFORCEMENT === 'true' &&
+      db.groupModeration.mode === 'enforce' &&
+      db.groupModeration.enabled === true &&
+      db.systemSafety.paused !== true
+  };
+}
+
 app.get('/api/groups/moderation', requireAuth, (req, res) => {
   const state = db.baileysConnector || {};
+  const setup = baileysControlSnapshot();
   res.json({
     policy: db.groupModeration,
     connector: {
       connected: state.connected === true,
       mode: state.connected === true ? 'baileys' : 'configuration_and_simulation',
-      liveEnforcement: state.connected === true && process.env.BAILEYS_GROUP_ENFORCEMENT === 'true' && db.groupModeration.mode === 'enforce',
+      liveEnforcement: setup.liveEnforcement,
       canDeleteMessages: state.connected === true && state.canDeleteMessages === true,
       lastHeartbeatAt: state.lastHeartbeatAt || null,
       note: state.connected === true
-        ? 'Baileys est connecté. L’application reste soumise aux capacités réelles du compte et aux règles WhatsApp.'
+        ? 'Baileys est connecté. L’enforcement dépend encore de la politique, de l’arrêt d’urgence et des droits admin.'
         : 'Baileys n’est pas connecté. Les règles restent en configuration/simulation.'
-    }
+    },
+    setup
   });
 });
 app.post('/api/groups/moderation', requireAuth, async (req, res) => {
@@ -696,18 +740,85 @@ app.get('/api/connectors/baileys/config', requireConnectorToken, (req, res) => {
     policy: db.groupModeration,
     safety: db.systemSafety,
     enforcementRequested: process.env.BAILEYS_GROUP_ENFORCEMENT === 'true',
-    connector: state
+    connector: state,
+    setup: baileysControlSnapshot()
   });
 });
 
+app.post('/api/connectors/baileys/setup', requireAuth, async (req, res) => {
+  const mode = req.body?.mode === 'pairing' ? 'pairing' : 'qr';
+  const rawNumber = String(req.body?.pairingNumber || '').trim();
+  const pairingNumber = rawNumber.replace(/\D/g, '');
+  if (mode === 'pairing' && !/^\d{8,15}$/.test(pairingNumber)) {
+    return res.status(400).json({ error: 'Le numéro doit contenir uniquement le code pays et les chiffres, sans +, espace, parenthèses ni tirets.' });
+  }
+  db.baileysSetup = {
+    ...db.baileysSetup,
+    mode,
+    pairingNumber: mode === 'pairing' ? pairingNumber : '',
+    updatedAt: new Date().toISOString(),
+    resetRequestedAt: null
+  };
+  baileysLive.status = mode === 'pairing' ? 'pairing_waiting' : 'qr_waiting';
+  baileysLive.lastError = null;
+  await saveDb();
+  res.json({ ok: true, setup: baileysControlSnapshot() });
+});
+
+app.post('/api/connectors/baileys/reset', requireAuth, async (req, res) => {
+  db.baileysSetup = {
+    ...db.baileysSetup,
+    resetRequestedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  baileysLive.qrDataUrl = '';
+  baileysLive.pairingCode = '';
+  baileysLive.status = 'reset_requested';
+  baileysLive.lastError = null;
+  await saveDb();
+  res.json({ ok: true, setup: baileysControlSnapshot() });
+});
+
+
 app.post('/api/connectors/baileys/heartbeat', requireConnectorToken, async (req, res) => {
+  const connected = req.body?.connected === true;
   db.baileysConnector = {
-    connected: req.body?.connected === true,
+    connected,
     canDeleteMessages: req.body?.canDeleteMessages === true,
     userId: String(req.body?.userId || '').slice(0, 100),
     lastHeartbeatAt: new Date().toISOString()
   };
+  baileysLive.status = connected ? 'connected' : (baileysLive.status === 'reset_requested' ? 'reset_requested' : 'disconnected');
+  if (connected) {
+    baileysLive.connectedAt = baileysLive.connectedAt || new Date().toISOString();
+    baileysLive.qrDataUrl = '';
+    baileysLive.pairingCode = '';
+    baileysLive.lastError = null;
+  }
   await saveDb();
+  res.json({ ok: true });
+});
+
+app.post('/api/connectors/baileys/pairing-update', requireConnectorToken, async (req, res) => {
+  const status = String(req.body?.status || 'waiting').slice(0, 40);
+  const qrDataUrl = String(req.body?.qrDataUrl || '');
+  const pairingCode = String(req.body?.pairingCode || '').slice(0, 32);
+  const error = String(req.body?.error || '').slice(0, 500);
+  if (qrDataUrl && (!qrDataUrl.startsWith('data:image/png;base64,') || qrDataUrl.length > 200000)) {
+    return res.status(400).json({ error: 'QR invalide ou trop volumineux.' });
+  }
+  baileysLive.status = status;
+  if (qrDataUrl) {
+    baileysLive.qrDataUrl = qrDataUrl;
+    baileysLive.lastQrAt = new Date().toISOString();
+    baileysLive.pairingCode = '';
+  }
+  if (pairingCode) {
+    baileysLive.pairingCode = pairingCode;
+    baileysLive.lastPairingAt = new Date().toISOString();
+    baileysLive.qrDataUrl = '';
+  }
+  baileysLive.lastError = error || null;
   res.json({ ok: true });
 });
 
