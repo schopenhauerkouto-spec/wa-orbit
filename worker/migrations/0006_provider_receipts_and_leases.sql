@@ -39,3 +39,15 @@ WHERE EXISTS (
 );
 CREATE INDEX IF NOT EXISTS idx_wa_contacts_last_inbound
   ON wa_contacts(last_inbound_at);
+
+CREATE TABLE IF NOT EXISTS wa_ai_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  draft_id INTEGER NOT NULL UNIQUE REFERENCES wa_message_drafts(id) ON DELETE CASCADE,
+  contact_id TEXT NOT NULL REFERENCES wa_contacts(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL DEFAULT 'groq',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wa_ai_usage_contact_time
+  ON wa_ai_usage(contact_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_wa_ai_usage_created
+  ON wa_ai_usage(created_at DESC);
