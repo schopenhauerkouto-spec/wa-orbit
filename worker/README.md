@@ -137,7 +137,7 @@ Le connecteur ne doit jamais considérer une liste de brouillons comme une autor
 
 ## Réception, mémoire et fiabilité
 
-Les événements Meta sont vérifiés avec la signature HMAC SHA-256. Les messages entrants sont dédupliqués par identifiant fournisseur avant toute mise à jour de conversation ou création de brouillon : une nouvelle livraison du même webhook ne crée donc pas de deuxième brouillon. Pour les contacts autorisés, les thèmes détectés alimentent la mémoire de conversation et la mémoire relationnelle.
+Les événements Meta sont vérifiés avec la signature HMAC SHA-256. Les messages entrants sont dédupliqués par identifiant fournisseur avant toute mise à jour de conversation ou création de brouillon : une nouvelle livraison du même webhook ne crée donc pas de deuxième brouillon. Un texte libre ne peut être autorisé que si le dernier message entrant date de moins de 24 heures ; en dehors de cette fenêtre, la réservation exige un modèle Meta configuré et approuvé. Sans modèle, le brouillon reste en attente. Pour les contacts autorisés, les thèmes détectés alimentent la mémoire de conversation et la mémoire relationnelle.
 
 Les accusés Meta sont stockés dans `webhook_statuses` et rapprochés de `wa_action_queue.provider_message_id`. Les baux d'action abandonnés sont récupérés après 10 minutes ; les tentatives sont limitées à cinq avec temporisation exponentielle. Les erreurs définitives sont conservées dans la file et l'audit pour inspection.
 
