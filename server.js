@@ -6,6 +6,7 @@ import connectPgSimple from 'connect-pg-simple';
 import pg from 'pg';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
+import { defaultGroupModerationPolicy, normalizeGroupModerationPolicy, inspectGroupMessage } from './src/group-moderation-policy.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
@@ -85,6 +86,7 @@ if (!db.groqQuota || typeof db.groqQuota !== 'object') db.groqQuota = null;
 if (!db.botUsage || typeof db.botUsage !== 'object') db.botUsage = null;
 if (!db.systemSafety || typeof db.systemSafety !== 'object') db.systemSafety = { paused: true, reason: 'Initialisation sécurisée', updatedAt: null };
 if (typeof db.systemSafety.paused !== 'boolean') db.systemSafety.paused = true;
+db.groupModeration = normalizeGroupModerationPolicy(db.groupModeration || defaultGroupModerationPolicy());
 for (const contact of db.contacts) { if (!Array.isArray(contact.messages)) contact.messages = []; }
 let saveChain = Promise.resolve();
 function saveDb() {
@@ -653,6 +655,37 @@ app.post('/api/safety/pause', requireAuth, async (req, res) => {
   addEvent({ kind: paused ? 'safety-paused' : 'safety-resumed', text: paused ? 'Arrêt d’urgence activé : les envois sortants et réponses automatiques sont suspendus.' : 'Reprise manuelle : les contrôles habituels restent obligatoires.' });
   await saveDb();
   res.json({ ok: true, ...db.systemSafety });
+});
+
+app.get('/api/groups/moderation', requireAuth, (req, res) => {
+  res.json({
+    policy: db.groupModeration,
+    connector: {
+      connected: false,
+      mode: 'configuration_and_simulation',
+      liveEnforcement: false,
+      canDeleteMessages: false,
+      note: 'Aucune source de messages de groupe ni action de modération n’est connectée à cette version.'
+    }
+  });
+});
+app.post('/api/groups/moderation', requireAuth, async (req, res) => {
+  db.groupModeration = normalizeGroupModerationPolicy(req.body || {});
+  addEvent({ kind: 'group-policy-updated', text: 'Les règles de modération des groupes ont été mises à jour.' });
+  await saveDb();
+  res.json({ ok: true, policy: db.groupModeration });
+});
+app.post('/api/groups/moderation/simulate', requireAuth, (req, res) => {
+  const text = String(req.body?.text || '').slice(0, 4096);
+  if (!text.trim()) return res.status(400).json({ error: 'Ajoute un message à analyser.' });
+  const result = inspectGroupMessage({
+    policy: db.groupModeration,
+    text,
+    senderId: String(req.body?.senderId || 'simulation-member'),
+    senderIsAdmin: req.body?.senderIsAdmin === true,
+    history: Array.isArray(req.body?.history) ? req.body.history.slice(-100) : []
+  });
+  return res.json(result);
 });
 
 app.get('/api/groq/quota', requireAuth, (req, res) => res.json(groqQuotaStatus()));
