@@ -1,9 +1,11 @@
 import { OrbitClient } from "./client.js";
 import { ActionQueue } from "./queue.js";
 import { canSend, normalizeEvent } from "./policy.js";
+import { MetaCloudTransport } from "./meta-cloud-transport.js";
 
 export function createConnector(config) {
   const orbit = new OrbitClient(config);
+  const transport = config.transport || (config.meta?.accessToken && config.meta?.phoneNumberId ? new MetaCloudTransport(config.meta) : null);
   const queue = new ActionQueue({minDelayMs: config.minDelayMs || 30000});
 
   async function statusReceived(status) {
@@ -31,12 +33,13 @@ export function createConnector(config) {
     return {ok:true, queued:true};
   }
 
-  return {statusReceived, executeApproved, queue};
+  return {statusReceived, executeApproved, queue, transport};
 }
 
 
-export async function syncApproved(config, transport) {
+export async function syncApproved(config, transport = createConnector(config).transport) {
   const connector=createConnector(config);
+  if(!transport) throw new Error("WHATSAPP_TRANSPORT_REQUIRED");
   const batch=await connector.orbit.claimActions(Math.min(5,config.batchSize||5));
   const results=[];
   for(const action of batch.actions||[]) {
