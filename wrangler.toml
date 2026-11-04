@@ -15,3 +15,6 @@ migrations_dir = "worker/migrations"
 
 [vars]
 BOT_AUTO_REPLY_ENABLED = "false"
+
+[triggers]
+crons = ["0 8 * * *"]
