@@ -85,6 +85,9 @@ if (!Array.isArray(db.processedMessageIds)) db.processedMessageIds = [];
 if (!db.groqQuota || typeof db.groqQuota !== 'object') db.groqQuota = null;
 if (!db.botUsage || typeof db.botUsage !== 'object') db.botUsage = null;
 if (!db.systemSafety || typeof db.systemSafety !== 'object') db.systemSafety = { paused: true, reason: 'Initialisation sécurisée', updatedAt: null };
+if (!db.baileysConnector || typeof db.baileysConnector !== 'object') {
+  db.baileysConnector = { connected: false, canDeleteMessages: false, userId: '', lastHeartbeatAt: null };
+}
 if (typeof db.systemSafety.paused !== 'boolean') db.systemSafety.paused = true;
 db.groupModeration = normalizeGroupModerationPolicy(db.groupModeration || defaultGroupModerationPolicy());
 for (const contact of db.contacts) { if (!Array.isArray(contact.messages)) contact.messages = []; }
@@ -153,6 +156,14 @@ const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: '
 function requireAuth(req, res, next) {
   if (req.session?.authenticated) return next();
   return res.status(401).json({ error: 'Authentification requise.' });
+}
+function requireConnectorToken(req, res, next) {
+  const expected = process.env.BAILEYS_CONNECTOR_TOKEN;
+  const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!expected || !safeEqual(supplied, expected)) {
+    return res.status(401).json({ error: 'Connecteur non authentifié.' });
+  }
+  return next();
 }
 function normalizePhone(value) {
   return String(value || '').replace(/[\s().-]/g, '').replace(/^00/, '+');
@@ -658,14 +669,18 @@ app.post('/api/safety/pause', requireAuth, async (req, res) => {
 });
 
 app.get('/api/groups/moderation', requireAuth, (req, res) => {
+  const state = db.baileysConnector || {};
   res.json({
     policy: db.groupModeration,
     connector: {
-      connected: false,
-      mode: 'configuration_and_simulation',
-      liveEnforcement: false,
-      canDeleteMessages: false,
-      note: 'Aucune source de messages de groupe ni action de modération n’est connectée à cette version.'
+      connected: state.connected === true,
+      mode: state.connected === true ? 'baileys' : 'configuration_and_simulation',
+      liveEnforcement: state.connected === true && process.env.BAILEYS_GROUP_ENFORCEMENT === 'true' && db.groupModeration.mode === 'enforce',
+      canDeleteMessages: state.connected === true && state.canDeleteMessages === true,
+      lastHeartbeatAt: state.lastHeartbeatAt || null,
+      note: state.connected === true
+        ? 'Baileys est connecté. L’application reste soumise aux capacités réelles du compte et aux règles WhatsApp.'
+        : 'Baileys n’est pas connecté. Les règles restent en configuration/simulation.'
     }
   });
 });
@@ -675,6 +690,41 @@ app.post('/api/groups/moderation', requireAuth, async (req, res) => {
   await saveDb();
   res.json({ ok: true, policy: db.groupModeration });
 });
+app.get('/api/connectors/baileys/config', requireConnectorToken, (req, res) => {
+  const state = db.baileysConnector || {};
+  res.json({
+    policy: db.groupModeration,
+    safety: db.systemSafety,
+    enforcementRequested: process.env.BAILEYS_GROUP_ENFORCEMENT === 'true',
+    connector: state
+  });
+});
+
+app.post('/api/connectors/baileys/heartbeat', requireConnectorToken, async (req, res) => {
+  db.baileysConnector = {
+    connected: req.body?.connected === true,
+    canDeleteMessages: req.body?.canDeleteMessages === true,
+    userId: String(req.body?.userId || '').slice(0, 100),
+    lastHeartbeatAt: new Date().toISOString()
+  };
+  await saveDb();
+  res.json({ ok: true });
+});
+
+app.post('/api/connectors/baileys/events', requireConnectorToken, async (req, res) => {
+  const event = req.body && typeof req.body === 'object' ? req.body : {};
+  addEvent({
+    kind: String(event.kind || 'baileys-event').slice(0, 80),
+    text: String(event.text || 'Événement Baileys').slice(0, 500),
+    groupId: String(event.groupId || '').slice(0, 128),
+    senderId: String(event.senderId || '').slice(0, 128),
+    decision: String(event.decision || '').slice(0, 80),
+    violations: Array.isArray(event.violations) ? event.violations.slice(0, 10) : []
+  });
+  await saveDb();
+  res.json({ ok: true });
+});
+
 app.post('/api/groups/moderation/simulate', requireAuth, (req, res) => {
   const text = String(req.body?.text || '').slice(0, 4096);
   if (!text.trim()) return res.status(400).json({ error: 'Ajoute un message à analyser.' });
