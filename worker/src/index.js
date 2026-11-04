@@ -684,7 +684,7 @@ export default {
         return json({ error: "Erreur interne." }, 500);
       }
     }
-    if (url.pathname === "/" || url.pathname === "/") {
+    if (url.pathname === "/") {
       return json({service:"wa-orbit-worker",status:"running",dashboard:"hosted-by-express",health:"/health"});
     }
     return json({error:"Route introuvable."},404);
