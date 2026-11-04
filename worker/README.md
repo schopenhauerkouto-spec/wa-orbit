@@ -10,16 +10,23 @@
 - Exclusion des conversations actives de la sélection de nouvelles prises de contact.
 - Opt-out immédiat, pause d'urgence persistante.
 - API protégée par `ADMIN_API_TOKEN`.
+- Personnalité configurable : motivateur enthousiaste, ingénieux, patient, paisible et accueillant.
+- Profils relationnels par contact : type de relation, ton préféré, priorité, notes, sujets et date de suivi.
+- Sélection quotidienne enrichie : priorise les suivis arrivés à échéance puis les relations prioritaires.
 
 ## API admin
 Toutes les routes `/api/*` exigent `Authorization: Bearer <ADMIN_API_TOKEN>`.
 
+- `GET /api/personality`
+- `POST /api/personality` pour modifier le nom, rôle, ton, mission, valeurs et règles de style.
 - `GET /api/safety`
 - `POST /api/safety/pause` avec `{"paused":true}` ou `{"paused":false}`
 - `GET /api/contacts`
 - `POST /api/contacts/import` avec `{"contacts":[{"phone":"+2250700000000","name":"Nom"}]}`
 - `GET /api/contacts/daily-selection`
 - `POST /api/contacts/:id/action` avec `{"action":"opt_in","consent_source":"..."}`
+- `GET /api/contacts/:id/profile`
+- `POST /api/contacts/:id/profile` avec `relationship_type`, `preferred_tone`, `priority`, `notes`, `topics`, `follow_up_after_days` et `follow_up_due_at`
 - Actions supplémentaires : `opt_out`, `sent`, `conversation_active`, `conversation_closed`.
 
 ## Règles anti-répétition
@@ -46,3 +53,22 @@ Cette étape fournit le moteur de contacts, de sélection et de suivi. Elle ne d
 - Tester l'authentification, l'import, le quota, le cooldown, l'opt-out et l'idempotence webhook.
 
 La migration Cloudflare ne remplace pas la base Supabase DIGIT+ déjà préparée. Cette branche utilise D1 pour que le Worker puisse fonctionner sans exposer de clé privilégiée dans le navigateur.
+
+
+## Personnalité WA Orbit
+
+Le moteur de personnalité ne sert pas à masquer une automatisation. Il définit la qualité du comportement : chaleureux, enthousiaste mais jamais insistant, patient, paisible, accueillant, curieux et capable d'adapter son ton au contexte du contact.
+
+Principes :
+1. Écouter et tenir compte du contexte avant de répondre.
+2. Ne jamais inventer un souvenir, une information ou une proximité.
+3. Favoriser des messages courts et humains.
+4. Respecter le rythme et les préférences du contact.
+5. Transformer une relance en conversation utile plutôt qu'en répétition.
+6. Garder l'utilisateur aux commandes avec pause et opt-out.
+
+## Vision produit
+
+WA Orbit évolue vers un **agent personnel de relation** : il observe les interactions autorisées, mémorise le contexte utile, identifie les suivis pertinents, prépare une formulation adaptée et laisse l'utilisateur décider du niveau d'automatisation.
+
+Baileys pourra être ajouté comme connecteur WhatsApp séparé. Le Worker Cloudflare reste le cerveau/API ; aucune promesse de compatibilité Baileys avec le runtime Workers n'est faite ici.
