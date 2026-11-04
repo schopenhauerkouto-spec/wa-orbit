@@ -56,6 +56,9 @@ export async function syncApproved(config, transportOverride) {
     try {
       authorization = await connector.orbit.authorizeAction(action.id);
     } catch (error) {
+      try {
+        await connector.orbit.actionResult(action.id, {status: "deferred", error: "authorization_unavailable"});
+      } catch {}
       results.push({id: action.id, ok: false, reason: "authorization_unavailable"});
       continue;
     }
