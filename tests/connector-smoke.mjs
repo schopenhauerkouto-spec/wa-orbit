@@ -30,7 +30,7 @@ const requests=[];
 const transport=new MetaCloudTransport({
   accessToken:"test-token",
   phoneNumberId:"123",
-  apiVersion:"v23.0",
+  apiVersion:"v26.0",
   fetchImpl:async(url,options)=>{
     requests.push({url,options});
     return new Response(JSON.stringify({messages:[{id:"wamid.test"}]}),{status:200,headers:{"content-type":"application/json"}});
