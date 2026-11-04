@@ -57,18 +57,4 @@ export class OrbitClient {
       body: JSON.stringify({statuses})
     });
   }
-
-  ingestInbound(message) {
-    return this.request("/api/connector/inbound", {
-      method: "POST",
-      body: JSON.stringify(message)
-    });
-  }
-
-  ingestReceipts(receipts) {
-    return this.request("/api/connector/receipts", {
-      method: "POST",
-      body: JSON.stringify({receipts})
-    });
-  }
 }
