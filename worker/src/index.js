@@ -43,7 +43,7 @@ async function handleWebhookVerification(url, env) {
   return new Response(challenge, { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } });
 }
 
-async function handleWebhook(request, env) {
+async function handleWebhook(request, env, ctx) {
   if (!env.DB || !env.WHATSAPP_APP_SECRET) return json({ error: "Webhook non configuré." }, 503);
   const rawBody = await request.arrayBuffer();
   if (rawBody.byteLength > 2 * 1024 * 1024) return json({ error: "Payload trop volumineux." }, 413);
@@ -120,11 +120,14 @@ async function handleWebhook(request, env) {
             const draftBody = topics.length
               ? "Je vois 👀 Ça m’intéresse. Tu peux m’en dire un peu plus ?"
               : "Bien reçu. Merci pour ton message 😊";
-            await createDraft(env, {
+            const draftId=await createDraft(env, {
               contactId: contact.id, sourceType: "conversation", sourceId: text(message.id, 200),
               intent: topics.length ? "discuss_topic" : "reply_naturally",
               tone: "natural", body: draftBody, provider: "rule_engine"
             });
+            if(draftId&&ctx&&env.GROQ_DRAFTS_ENABLED==="true"){
+              ctx.waitUntil(refineDraftWithAI(env,draftId).catch(()=>({generated:false,reason:"groq_background_error"})));
+            }
           }
         }
         receivedMessages++;
@@ -347,6 +350,89 @@ async function createDraft(env,x) {
 }
 function makeFollowUpDraft(c) { const n=text(c.display_name||'',100), g=n?'Salut '+n+' 👋':'Salut 👋'; if(c.preferred_tone==='warm')return g+' Ça fait un moment, j’espère que tu vas bien. Quoi de neuf de ton côté ?'; if(c.preferred_tone==='professional')return g+' J’espère que tu vas bien. Ça fait quelque temps, comment avancent tes projets ?'; return g+' Ça fait un moment 😄 Comment tu vas ? Quoi de neuf de ton côté ?'; }
 function makeStatusDraft(c,topics,active) { const p=c.display_name?'@'+text(c.display_name,80)+', ':''; if(active)return p+'ça me fait rebondir sur ce que tu dis. Tu en penses quoi exactement ?'; if(topics[0]==='basketball')return p+'ça m’intéresse ça 🏀 Tu suis ça depuis longtemps ?'; if(topics[0]==='business')return p+'intéressant ça 👀 Tu vois ça comment concrètement ?'; if(topics[0]==='technology')return p+'ça m’intéresse 👀 Tu l’utilises déjà ou tu découvres le sujet ?'; return p+'intéressant ça 👀 Tu en penses quoi ?'; }
+
+async function refineDraftWithAI(env,draftId) {
+  if(env.GROQ_DRAFTS_ENABLED!=="true"||!env.GROQ_API_KEY) return {generated:false,reason:"ai_disabled"};
+  const draft=await env.DB.prepare(
+    "SELECT d.*,c.display_name,c.consent_status FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.id=?"
+  ).bind(draftId).first();
+  if(!draft||draft.status!=="draft") return {generated:false,reason:"draft_not_editable"};
+  if(draft.consent_status!=="opted_in") return {generated:false,reason:"consent_required"};
+
+  const [personality,profile,memory,source]=await Promise.all([
+    env.DB.prepare("SELECT name,role,tone,mission,values_json,style_rules_json FROM wa_personality WHERE id=1").first(),
+    env.DB.prepare("SELECT relationship_type,preferred_tone,notes,topics_json FROM wa_contact_profiles WHERE contact_id=?").bind(draft.contact_id).first(),
+    env.DB.prepare("SELECT summary,last_intent,last_topics_json FROM wa_conversation_memory WHERE contact_id=?").bind(draft.contact_id).first(),
+    draft.source_type==="conversation"
+      ? env.DB.prepare("SELECT message_text AS content FROM webhook_messages WHERE message_id=?").bind(draft.source_id).first()
+      : draft.source_type==="status"
+        ? env.DB.prepare("SELECT text_content AS content FROM wa_status_events WHERE external_id=?").bind(draft.source_id).first()
+        : Promise.resolve(null)
+  ]);
+
+  const fallback= draft.body;
+  const system=[
+    "Tu es le moteur de rédaction de WA Orbit, assistant relationnel chaleureux, patient, paisible et curieux.",
+    "Tu prépares un brouillon que le propriétaire relira et approuvera manuellement. Tu ne déclenches jamais l'envoi.",
+    "Écris en français naturel, court, précis et adapté au ton indiqué.",
+    "N'invente aucun souvenir, fait, intérêt, promesse, proximité ou détail absent du contexte.",
+    "Ne prétends pas être une personne autonome et ne révèle aucun secret technique.",
+    "Retourne uniquement le texte du message proposé, sans guillemets, commentaire ni liste."
+  ].join(" ");
+
+  const context={
+    purpose:draft.intent,
+    source_type:draft.source_type,
+    tone:draft.tone||profile?.preferred_tone||"natural",
+    relationship:profile?.relationship_type||"unknown",
+    relationship_notes:text(profile?.notes||"",500),
+    known_topics:parseJsonSafe(profile?.topics_json,[]),
+    conversation_summary:text(memory?.summary||"",900),
+    last_intent:memory?.last_intent||"",
+    recent_topics:parseJsonSafe(memory?.last_topics_json,[]),
+    incoming_content:text(source?.content||"",1200),
+    current_draft:fallback
+  };
+
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),9000);
+  try {
+    const response=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+      method:"POST",
+      headers:{
+        Authorization:"Bearer "+env.GROQ_API_KEY,
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        model:env.GROQ_MODEL||"openai/gpt-oss-20b",
+        messages:[
+          {role:"system",content:system},
+          {role:"user",content:"Prépare un seul brouillon à partir de ce contexte JSON : "+JSON.stringify(context)}
+        ],
+        max_tokens:180,
+        temperature:0.65
+      }),
+      signal:controller.signal
+    });
+    if(!response.ok) return {generated:false,reason:"groq_http_"+response.status};
+    const data=await response.json();
+    let generated=String(data?.choices?.[0]?.message?.content||"").trim();
+    generated=generated.replace(/^["'«]+|["'»]+$/g,"").replace(/\s+/g," ").trim();
+    if(!generated||generated.length>700) return {generated:false,reason:"invalid_ai_output"};
+    const now=isoNow();
+    const updated=await env.DB.prepare(
+      "UPDATE wa_message_drafts SET body=?,provider='groq',updated_at=? WHERE id=? AND status='draft' AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=wa_message_drafts.id)"
+    ).bind(generated,now,draftId).run();
+    return Number(updated?.meta?.changes||0)===1
+      ? {generated:true,provider:"groq",model:env.GROQ_MODEL||"openai/gpt-oss-20b"}
+      : {generated:false,reason:"draft_already_changed"};
+  } catch {
+    return {generated:false,reason:"groq_unavailable"};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function planDailyDrafts(env) {
   const settings=await env.DB.prepare("SELECT daily_limit,paused FROM wa_settings WHERE id=1").first();
   if(!settings||settings.paused) return {planned:0,paused:true};
@@ -369,13 +455,16 @@ async function planDailyDrafts(env) {
     await env.DB.prepare(
       "UPDATE wa_contact_profiles SET follow_up_due_at=NULL,updated_at=? WHERE contact_id=?"
     ).bind(now,contact.id).run();
-    await createDraft(env,{contactId:contact.id,sourceType:"follow_up",sourceId:"daily:"+today+":"+contact.id,intent:"reconnect",tone:contact.preferred_tone,body:makeFollowUpDraft(contact)});
+    const draftId=await createDraft(env,{contactId:contact.id,sourceType:"follow_up",sourceId:"daily:"+today+":"+contact.id,intent:"reconnect",tone:contact.preferred_tone,body:makeFollowUpDraft(contact)});
+    if(draftId&&env.GROQ_DRAFTS_ENABLED==="true"){
+      await refineDraftWithAI(env,draftId);
+    }
     planned++;
   }
   return {planned,paused:false,date:today};
 }
 
-async function ingestStatus(request,env) {
+async function ingestStatus(request,env,ctx) {
   const body=await readJson(request,128*1024);
   if(!Array.isArray(body.statuses)||body.statuses.length>100) return json({error:"Fournis 1 à 100 statuts."},400);
   const policy=await getInteractionPolicy(env), results=[];
@@ -404,7 +493,10 @@ async function ingestStatus(request,env) {
     }
     await learnContactTopics(env,contact.id,topics,4);
     if(choice.decision==="reply"||choice.decision==="continue"){
-      await createDraft(env,{contactId:contact.id,sourceType:"status",sourceId:externalId,intent:choice.decision==="continue"?"continue_conversation":"comment_on_status",body:makeStatusDraft(contact,topics,contact.conversation_state==="active")});
+      const draftId=await createDraft(env,{contactId:contact.id,sourceType:"status",sourceId:externalId,intent:choice.decision==="continue"?"continue_conversation":"comment_on_status",body:makeStatusDraft(contact,topics,contact.conversation_state==="active")});
+      if(draftId&&ctx&&env.GROQ_DRAFTS_ENABLED==="true"){
+        ctx.waitUntil(refineDraftWithAI(env,draftId).catch(()=>({generated:false,reason:"groq_background_error"})));
+      }
     } else if(choice.decision==="remember"&&topics.length){
       for(const topic of topics){
         await env.DB.prepare("INSERT INTO wa_relationship_memory(contact_id,memory_type,content,source,importance,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)")
@@ -603,7 +695,7 @@ async function listActionQueue(env,url) {
   return json({actions:r.results||[]});
 }
 
-async function handleApi(request, env, url) {
+async function handleApi(request, env, url, ctx) {
   if (!env.DB) return json({ error: "Base D1 non configurée." }, 503);
   if (!authorized(request, env)) return json({ error: "Authentification requise." }, 401);
   if (request.method === "POST" && url.pathname === "/api/actions/claim") return claimActions(request, env);
@@ -631,7 +723,12 @@ async function handleApi(request, env, url) {
       .bind(n(b.status_reply_threshold,p.status_reply_threshold,0,100),n(b.status_reaction_threshold,p.status_reaction_threshold,0,100),n(b.status_remember_threshold,p.status_remember_threshold,0,100),n(b.max_status_interactions_per_contact_7d,p.max_status_interactions_per_contact_7d,0,50),n(b.min_hours_between_status_interactions,p.min_hours_between_status_interactions,1,720),n(b.social_energy_daily,p.social_energy_daily,0,50),isoNow()).run();
     return json(await getInteractionPolicy(env));
   }
-  if (request.method === "POST" && url.pathname === "/api/status-events") return ingestStatus(request,env);
+  if (request.method === "POST" && url.pathname === "/api/status-events") return ingestStatus(request,env,ctx);
+  const draftRefineMatch=url.pathname.match(/^\/api\/drafts\/(\d+)\/refine$/);
+  if(draftRefineMatch&&request.method==="POST"){
+    const result=await refineDraftWithAI(env,Number(draftRefineMatch[1]));
+    return json(result,result.generated?200:result.reason==="ai_disabled"?409:422);
+  }
   const draftMatch=url.pathname.match(/^\/api\/drafts\/(\d+)$/);
   if (draftMatch && request.method === "POST") return updateDraft(request,env,Number(draftMatch[1]));
   if (request.method === "POST" && url.pathname === "/api/personality") return updatePersonality(request, env);
@@ -661,7 +758,7 @@ async function handleApi(request, env, url) {
 
 export default {
   async scheduled(controller, env, ctx) { ctx.waitUntil(planDailyDrafts(env).catch(()=>{})); },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/health" && request.method === "GET") {
       try {
@@ -674,10 +771,10 @@ export default {
       }
     }
     if (url.pathname === "/webhook" && request.method === "GET") return handleWebhookVerification(url, env);
-    if (url.pathname === "/webhook" && request.method === "POST") return handleWebhook(request, env);
+    if (url.pathname === "/webhook" && request.method === "POST") return handleWebhook(request, env, ctx);
     if (url.pathname.startsWith("/api/")) {
       if (request.method === "OPTIONS") return new Response(null, { status: 204 });
-      try { return await handleApi(request, env, url); }
+      try { return await handleApi(request, env, url, ctx); }
       catch (error) {
         if (error.message === "PAYLOAD_TOO_LARGE") return json({ error: "Payload trop volumineux." }, 413);
         if (error.message === "INVALID_JSON") return json({ error: "JSON invalide." }, 400);
