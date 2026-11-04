@@ -629,11 +629,15 @@ async function claimActions(request, env) {
     }
   }
 
-  const claimLimit=Math.min(limit,Math.max(0,dailyLimit-sentToday));
-  if(!claimLimit) return json({actions:[],paused:false,remaining:0,message:"Quota quotidien atteint."});
+  const pendingNow=await env.DB.prepare(
+    "SELECT COUNT(*) n FROM wa_action_queue WHERE status IN ('queued','processing') AND scheduled_at>=datetime('now','start of day')"
+  ).first();
+  const claimCapacity=Math.max(0,dailyLimit-sentToday-Number(pendingNow?.n||0));
+  const claimLimit=Math.min(limit,claimCapacity);
+  if(!claimLimit) return json({actions:[],paused:false,remaining:0,message:"Quota quotidien atteint ou déjà réservé."});
   const ready=await env.DB.prepare(
-    "SELECT q.id,q.contact_id FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id WHERE q.status='queued' AND q.scheduled_at<=? AND c.consent_status='opted_in' AND c.conversation_state<>'active' ORDER BY q.scheduled_at ASC,q.id ASC LIMIT ?"
-  ).bind(now,claimLimit).all();
+    "SELECT q.id,q.contact_id FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.status='queued' AND q.scheduled_at<=? AND c.consent_status='opted_in' AND (c.conversation_state<>'active' OR (d.source_type='conversation' AND c.last_inbound_at>=?)) ORDER BY q.scheduled_at ASC,q.id ASC LIMIT ?"
+  ).bind(now,new Date(Date.now()-24*60*60*1000).toISOString(),claimLimit).all();
   const claimed=[];
   for(const item of ready.results||[]){
     const update=await env.DB.prepare(
