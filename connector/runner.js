@@ -1,7 +1,9 @@
 import "dotenv/config";
 import { syncApproved } from "./src/index.js";
+import { BaileysTransport } from "./src/baileys-transport.js";
+import { OrbitClient } from "./src/client.js";
 
-const required = ["ORBIT_API_URL", "ADMIN_API_TOKEN", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"];
+const required = ["ORBIT_API_URL", "ADMIN_API_TOKEN"];
 const missing = required.filter(name => !process.env[name]);
 if (missing.length) {
   console.error("Configuration manquante :", missing.join(", "));
@@ -12,25 +14,41 @@ const number = (name, fallback, min, max) => {
   const value = Number(process.env[name]);
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 };
+
+const orbit = new OrbitClient({
+  baseUrl: process.env.ORBIT_API_URL,
+  token: process.env.ADMIN_API_TOKEN
+});
+
+const transport = new BaileysTransport({
+  authDir: process.env.BAILEYS_AUTH_DIR || "./.baileys-auth",
+  phoneNumber: process.env.BAILEYS_PHONE_NUMBER || "",
+  onMessage: message => orbit.ingestInbound(message),
+  onReceipt: receipt => orbit.ingestReceipts([receipt])
+});
+
 const config = {
   baseUrl: process.env.ORBIT_API_URL,
   token: process.env.ADMIN_API_TOKEN,
-  meta: {
-    accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
-    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
-    apiVersion: process.env.WHATSAPP_API_VERSION || "v26.0"
-  },
+  transport,
   batchSize: number("ORBIT_BATCH_SIZE", 5, 1, 5),
   minDelayMs: number("ORBIT_MIN_DELAY_MS", 30000, 0, 300000)
 };
 const pollIntervalMs = number("ORBIT_POLL_INTERVAL_MS", 60000, 15000, 900000);
 let stopping = false;
 
-process.once("SIGINT", () => { stopping = true; });
-process.once("SIGTERM", () => { stopping = true; });
+const stop = async () => {
+  stopping = true;
+  await transport.stop();
+};
+process.once("SIGINT", () => { void stop(); });
+process.once("SIGTERM", () => { void stop(); });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-console.info("WA Orbit connector actif. Pause d'urgence et consentement restent contrôlés par le Worker.");
+
+await transport.connect();
+console.info("WA Orbit connector actif : Baileys = transport WhatsApp, Worker = cerveau et mémoire.");
+console.info("Aucun contournement anti-spam n'est implémenté ; pause, consentement et autorisation restent côté Worker.");
 
 while (!stopping) {
   try {
@@ -45,4 +63,5 @@ while (!stopping) {
   if (!stopping) await sleep(pollIntervalMs);
 }
 
+await transport.stop();
 console.info("WA Orbit connector arrêté proprement.");
