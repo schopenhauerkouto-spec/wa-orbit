@@ -447,7 +447,7 @@ async function refineDraftWithAI(env,draftId) {
   }
 }
 
-async function planDailyDrafts(env) {
+async function planDailyDrafts(env,ctx) {
   const settings=await env.DB.prepare("SELECT daily_limit,paused FROM wa_settings WHERE id=1").first();
   if(!settings||settings.paused) return {planned:0,paused:true};
   const today=dayKey();
@@ -470,8 +470,8 @@ async function planDailyDrafts(env) {
       "UPDATE wa_contact_profiles SET follow_up_due_at=NULL,updated_at=? WHERE contact_id=?"
     ).bind(now,contact.id).run();
     const draftId=await createDraft(env,{contactId:contact.id,sourceType:"follow_up",sourceId:"daily:"+today+":"+contact.id,intent:"reconnect",tone:contact.preferred_tone,body:makeFollowUpDraft(contact)});
-    if(draftId&&env.GROQ_DRAFTS_ENABLED==="true"){
-      await refineDraftWithAI(env,draftId);
+    if(draftId&&ctx&&env.GROQ_DRAFTS_ENABLED==="true"){
+      ctx.waitUntil(refineDraftWithAI(env,draftId).catch(()=>({generated:false,reason:"groq_background_error"})));
     }
     planned++;
   }
@@ -485,7 +485,7 @@ async function ingestStatus(request,env,ctx) {
   for(const item of body.statuses){
     const externalId=text(item.external_id||item.id,200), phone=normalizePhone(item.phone);
     if(!externalId||!validPhone(phone)){results.push({accepted:false,reason:"invalid_status"});continue;}
-    const contact=await env.DB.prepare("SELECT id,display_name,conversation_state FROM wa_contacts WHERE phone=?").bind(phone).first();
+    const contact=await env.DB.prepare("SELECT id,display_name,conversation_state,consent_status FROM wa_contacts WHERE phone=?").bind(phone).first();
     if(!contact){results.push({accepted:false,reason:"unknown_contact"});continue;}
     const profile=await ensureInterestProfile(env,contact.id);
     const cp=await env.DB.prepare("SELECT priority FROM wa_contact_profiles WHERE contact_id=?").bind(contact.id).first();
@@ -496,7 +496,10 @@ async function ingestStatus(request,env,ctx) {
     const daily=await env.DB.prepare("SELECT COUNT(*) n FROM wa_status_events WHERE created_at>=datetime('now','start of day') AND decision IN ('react','reply','continue')").first();
     const last=await env.DB.prepare("SELECT created_at FROM wa_status_events WHERE contact_id=? AND decision IN ('react','reply','continue') ORDER BY created_at DESC LIMIT 1").bind(contact.id).first();
     const hours=last?.created_at?(Date.now()-Date.parse(last.created_at))/3600000:9999;
-    const choice=chooseStatusDecision({interest,relationship,recentCount:Number(recent?.n||0),dailyCount:Number(daily?.n||0),hoursSinceLast:hours,policy,hasConversation:contact.conversation_state==="active"});
+    let choice=chooseStatusDecision({interest,relationship,recentCount:Number(recent?.n||0),dailyCount:Number(daily?.n||0),hoursSinceLast:hours,policy,hasConversation:contact.conversation_state==="active"});
+    if(contact.consent_status!=="opted_in"&&["react","reply","continue"].includes(choice.decision)){
+      choice={...choice,decision:topics.length?"remember":"ignore",reason:"consent_required"};
+    }
     const now=isoNow();
     const inserted=await env.DB.prepare(
       "INSERT OR IGNORE INTO wa_status_events(external_id,contact_id,content_type,text_content,detected_topics_json,interest_score,relationship_score,opportunity_score,decision,decision_reason,interaction_state,created_at,decided_at) VALUES(?,?,?,?,?,?,?,?,?,?, 'planned',?,?)"
@@ -771,7 +774,7 @@ async function handleApi(request, env, url, ctx) {
 }
 
 export default {
-  async scheduled(controller, env, ctx) { ctx.waitUntil(planDailyDrafts(env).catch(()=>{})); },
+  async scheduled(controller, env, ctx) { ctx.waitUntil(planDailyDrafts(env,ctx).catch(()=>{})); },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/health" && request.method === "GET") {
