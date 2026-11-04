@@ -438,14 +438,24 @@ async function claimActions(request, env) {
   const capacity=Math.max(0,dailyLimit-sentToday-pendingToday);
 
   if(capacity>0){
+    const templateConfigured=Boolean(env.WHATSAPP_TEMPLATE_NAME&&env.WHATSAPP_TEMPLATE_LANGUAGE);
+    const windowStart=new Date(Date.now()-24*60*60*1000).toISOString();
     const drafts=await env.DB.prepare(
-      "SELECT d.id,d.contact_id,d.body,c.phone FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND c.conversation_state<>'active' AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id) ORDER BY d.created_at ASC LIMIT ?"
-    ).bind(Math.min(limit,capacity)).all();
+      "SELECT d.id,d.contact_id,d.body,c.phone,c.last_interaction_at FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND c.conversation_state<>'active' AND (c.last_interaction_at>=? OR ?=1) AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id) ORDER BY d.created_at ASC LIMIT ?"
+    ).bind(windowStart,templateConfigured?1:0,Math.min(limit,capacity)).all();
     for(const draft of drafts.results||[]){
       const key="draft:"+draft.id;
+      const lastInteraction=Date.parse(draft.last_interaction_at||"");
+      const withinServiceWindow=Number.isFinite(lastInteraction)&&lastInteraction<=Date.now()&&Date.now()-lastInteraction<=24*60*60*1000;
+      const sendMode=withinServiceWindow?"text":"template";
+      const payload={phone:draft.phone,body:draft.body,mode:sendMode};
+      if(sendMode==="template"){
+        payload.template_name=env.WHATSAPP_TEMPLATE_NAME;
+        payload.template_language=env.WHATSAPP_TEMPLATE_LANGUAGE;
+      }
       const inserted=await env.DB.prepare(
-        "INSERT OR IGNORE INTO wa_action_queue(draft_id,contact_id,action_type,payload_json,status,attempts,idempotency_key,scheduled_at,created_at,updated_at) VALUES(?,?,'send_text',?,'queued',0,?,?,?,?)"
-      ).bind(draft.id,draft.contact_id,JSON.stringify({phone:draft.phone,body:draft.body}),key,now,now,now).run();
+        "INSERT OR IGNORE INTO wa_action_queue(draft_id,contact_id,action_type,send_mode,payload_json,status,attempts,idempotency_key,scheduled_at,created_at,updated_at) VALUES(?,?,'send_text',?,?,'queued',0,?,?,?,?)"
+      ).bind(draft.id,draft.contact_id,sendMode,JSON.stringify(payload),key,now,now,now).run();
       if(Number(inserted?.meta?.changes||0)===1){
         await env.DB.prepare("INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) SELECT id,contact_id,'queued',?,? FROM wa_action_queue WHERE idempotency_key=?")
           .bind(JSON.stringify({draft_id:draft.id}),now,key).run();
@@ -467,7 +477,7 @@ async function claimActions(request, env) {
     await env.DB.prepare("INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) VALUES(?,?, 'claimed',?,?)")
       .bind(item.id,item.contact_id,JSON.stringify({lease_started_at:now}),now).run();
     const full=await env.DB.prepare(
-      "SELECT q.id,q.draft_id,q.contact_id,q.action_type,q.payload_json,q.status,q.attempts,q.idempotency_key,q.scheduled_at,d.body,c.phone,c.display_name,c.consent_status,c.conversation_state FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?"
+      "SELECT q.id,q.draft_id,q.contact_id,q.action_type,q.send_mode,q.payload_json,q.status,q.attempts,q.idempotency_key,q.scheduled_at,d.body,c.phone,c.display_name,c.consent_status,c.conversation_state FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?"
     ).bind(item.id).first();
     if(full) claimed.push(full);
   }
@@ -478,12 +488,17 @@ async function authorizeAction(env,id) {
   const settings=await env.DB.prepare("SELECT paused FROM wa_settings WHERE id=1").first();
   if(!settings||settings.paused) return {authorized:false,reason:"emergency_pause",retryable:true};
   const action=await env.DB.prepare(
-    "SELECT q.status,c.consent_status,c.conversation_state FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?"
+    "SELECT q.status,q.send_mode,q.payload_json,c.consent_status,c.conversation_state,c.last_interaction_at FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?"
   ).bind(id).first();
   if(!action) return {authorized:false,reason:"action_not_found",retryable:false};
   if(action.status!=="processing") return {authorized:false,reason:"action_not_processing",retryable:false};
   if(action.consent_status!=="opted_in") return {authorized:false,reason:"consent_required",retryable:false};
   if(action.conversation_state==="active") return {authorized:false,reason:"conversation_active",retryable:false};
+  const lastInteraction=Date.parse(action.last_interaction_at||"");
+  const withinServiceWindow=Number.isFinite(lastInteraction)&&lastInteraction<=Date.now()&&Date.now()-lastInteraction<=24*60*60*1000;
+  if(!withinServiceWindow&&action.send_mode!=="template") return {authorized:false,reason:"template_required",retryable:false};
+  const payload=parseJsonSafe(action.payload_json,{});
+  if(action.send_mode==="template"&&(!payload.template_name||!payload.template_language)) return {authorized:false,reason:"template_not_configured",retryable:false};
   return {authorized:true};
 }
 
