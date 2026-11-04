@@ -356,8 +356,8 @@ function groupPolicyPayload() {
       enabled: $('#groupLinksEnabled').checked,
       allowAny: $('#groupAllowAnyLinks').checked,
       allowAdmins: $('#groupAllowAdminLinks').checked,
-      allowedDomains: $('#groupAllowedDomains').value.split(/[\\n,;]+/).map(v => v.trim()).filter(Boolean),
-      blockedDomains: $('#groupBlockedDomains').value.split(/[\\n,;]+/).map(v => v.trim()).filter(Boolean)
+      allowedDomains: $('#groupAllowedDomains').value.split(String.fromCharCode(10)).flatMap(line => line.split(/[,;]/)).map(v => v.trim()).filter(Boolean),
+      blockedDomains: $('#groupBlockedDomains').value.split(String.fromCharCode(10)).flatMap(line => line.split(/[,;]/)).map(v => v.trim()).filter(Boolean)
     },
     flood: {
       enabled: $('#groupFloodEnabled').checked,
