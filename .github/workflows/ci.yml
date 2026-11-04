@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, feat/inbox-conversations, feat/remote-connection-safety-foundation, feat/cloudflare-workers-foundation, feat/personality-relationship-engine]
   pull_request:
-    branches: [main]
+    branches: [main, feat/remote-connection-safety-foundation, feat/cloudflare-workers-foundation]
 
 permissions:
   contents: read
