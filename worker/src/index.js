@@ -452,6 +452,9 @@ async function claimActions(request, env) {
       if(sendMode==="template"){
         payload.template_name=env.WHATSAPP_TEMPLATE_NAME;
         payload.template_language=env.WHATSAPP_TEMPLATE_LANGUAGE;
+        payload.template_body_parameter=String(env.WHATSAPP_TEMPLATE_BODY_PARAMETER||"false").toLowerCase()==="true";
+        const components=parseJsonSafe(env.WHATSAPP_TEMPLATE_COMPONENTS_JSON,[]);
+        if(Array.isArray(components)&&components.length) payload.template_components=components;
       }
       const inserted=await env.DB.prepare(
         "INSERT OR IGNORE INTO wa_action_queue(draft_id,contact_id,action_type,send_mode,payload_json,status,attempts,idempotency_key,scheduled_at,created_at,updated_at) VALUES(?,?,'send_text',?,?,'queued',0,?,?,?,?)"
