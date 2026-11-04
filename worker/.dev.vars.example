@@ -8,3 +8,8 @@ WHATSAPP_TEMPLATE_LANGUAGE=fr
 WHATSAPP_TEMPLATE_BODY_PARAMETER=false
 # Optional valid JSON matching the exact approved Meta template components.
 # WHATSAPP_TEMPLATE_COMPONENTS_JSON=[]
+
+# Optional AI draft generation. Keep disabled until privacy notices and settings are ready.
+GROQ_DRAFTS_ENABLED=false
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_API_KEY=
