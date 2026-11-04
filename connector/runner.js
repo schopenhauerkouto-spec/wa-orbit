@@ -1,12 +1,11 @@
 import "dotenv/config";
 import { syncApproved } from "./src/index.js";
-import { BaileysTransport } from "./src/baileys-transport.js";
-import { OrbitClient } from "./src/client.js";
 
-const required = ["ORBIT_API_URL", "ADMIN_API_TOKEN"];
+const required = ["ORBIT_API_URL", "ADMIN_API_TOKEN", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"];
 const missing = required.filter(name => !process.env[name]);
 if (missing.length) {
   console.error("Configuration manquante :", missing.join(", "));
+  console.error("Le connecteur utilise uniquement l'API officielle WhatsApp Business. Un compte WhatsApp personnel ne peut pas être connecté via ce runner.");
   process.exit(1);
 }
 
@@ -14,41 +13,25 @@ const number = (name, fallback, min, max) => {
   const value = Number(process.env[name]);
   return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 };
-
-const orbit = new OrbitClient({
-  baseUrl: process.env.ORBIT_API_URL,
-  token: process.env.ADMIN_API_TOKEN
-});
-
-const transport = new BaileysTransport({
-  authDir: process.env.BAILEYS_AUTH_DIR || "./.baileys-auth",
-  phoneNumber: process.env.BAILEYS_PHONE_NUMBER || "",
-  onMessage: message => orbit.ingestInbound(message),
-  onReceipt: receipt => orbit.ingestReceipts([receipt])
-});
-
 const config = {
   baseUrl: process.env.ORBIT_API_URL,
   token: process.env.ADMIN_API_TOKEN,
-  transport,
+  meta: {
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+    apiVersion: process.env.WHATSAPP_API_VERSION || "v26.0"
+  },
   batchSize: number("ORBIT_BATCH_SIZE", 5, 1, 5),
   minDelayMs: number("ORBIT_MIN_DELAY_MS", 30000, 0, 300000)
 };
 const pollIntervalMs = number("ORBIT_POLL_INTERVAL_MS", 60000, 15000, 900000);
 let stopping = false;
-
-const stop = async () => {
-  stopping = true;
-  await transport.stop();
-};
-process.once("SIGINT", () => { void stop(); });
-process.once("SIGTERM", () => { void stop(); });
+process.once("SIGINT", () => { stopping = true; });
+process.once("SIGTERM", () => { stopping = true; });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-await transport.connect();
-console.info("WA Orbit connector actif : Baileys = transport WhatsApp, Worker = cerveau et mémoire.");
-console.info("Aucun contournement anti-spam n'est implémenté ; pause, consentement et autorisation restent côté Worker.");
+console.info("WA Orbit connector officiel WhatsApp Business actif.");
+console.info("Pause, consentement, fenêtre de service et modèles approuvés restent contrôlés côté Worker.");
 
 while (!stopping) {
   try {
@@ -62,6 +45,4 @@ while (!stopping) {
   }
   if (!stopping) await sleep(pollIntervalMs);
 }
-
-await transport.stop();
 console.info("WA Orbit connector arrêté proprement.");
