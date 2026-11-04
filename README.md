@@ -1,6 +1,6 @@
 # WA Orbit — WhatsApp Contact Hub
 
-WA Orbit est une application monoposte de gestion de contacts et de conversations WhatsApp Business. Elle utilise un frontend HTML/CSS/JavaScript natif, un backend Node.js/Express, la WhatsApp Cloud API de Meta et Groq pour les réponses qui nécessitent une compréhension du langage.
+WA Orbit est un assistant relationnel et un tableau de bord de gestion de conversations. Il propose deux parcours : un mode copilote pour WhatsApp personnel (rédaction IA puis copie manuelle) et un transport officiel WhatsApp Business Platform pour les comptes Business éligibles.
 
 ## Fonctionnalités
 
@@ -11,7 +11,7 @@ WA Orbit est une application monoposte de gestion de contacts et de conversation
 - Réponses automatiques aux messages entrants lorsque le réglage est activé, avec plafond journalier (50) et plafond par contact/heure (3) configurables.
 - Réponses locales aux commandes simples pour éviter des appels IA inutiles.
 - Groq pour les demandes complexes, avec estimation des tokens, raisonnement réglé sur `low`, quota local persistant et compteur visible.
-- Envoi manuel unitaire avec validation humaine, fenêtre de service de 24 h et modèles approuvés.
+- Préparation de réponses et copie manuelle vers WhatsApp personnel, sans connexion client non officielle.\n- Envoi unitaire vers WhatsApp Business officiel, avec validation humaine, fenêtre de service de 24 h et modèles approuvés.
 - Détection des demandes STOP / ARRÊT / UNSUBSCRIBE.
 - Sessions persistantes PostgreSQL en déploiement, rate limits HTTP, cookies HttpOnly/SameSite, contrôle d'origine et Helmet.
 - Arrêt d'urgence persistant, activé par défaut sur les nouvelles installations, qui bloque les envois sortants et les réponses automatiques jusqu'à reprise manuelle.
@@ -37,13 +37,13 @@ Le répertoire `worker/` contient désormais un backend D1 distinct du serveur h
 - rapprochement des reçus Meta `sent`, `delivered`, `read` et `failed` ;
 - contrôle de la fenêtre de service de 24 h et routage vers modèle approuvé hors fenêtre.
 
-Le processus `connector/` transmet les actions via Meta Cloud API. Il se lance avec `npm run connector:worker` et doit être déployé séparément comme Background Worker Render. Les secrets restent côté serveur.
+Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et doit être déployé séparément comme Background Worker Render. Les secrets restent côté serveur. Le connecteur ne prend pas en charge Baileys ni un client non officiel pour un compte personnel.
 
 **La migration du tableau de bord n'est pas terminée :** le frontend actuel appelle encore les routes de session de l'application Express (`/api/config`, `/api/events`, etc.). Il n'est donc pas encore raccordé à toutes les routes admin du Worker. La voie Express reste l'application web historique ; la voie Cloudflare/D1 est un backend distinct en cours d'intégration.
 
 Consulte [worker/README.md](worker/README.md) et [connector/README.md](connector/README.md) pour les migrations, secrets, règles Meta et déploiement.
 
-**Limite produit :** Meta Cloud API ne donne pas accès aux statuts personnels d'un compte WhatsApp classique. Le moteur d'analyse de statuts attend un connecteur séparé compatible et autorisé ; il ne contourne pas les protections de WhatsApp.
+**Limites produit :** un compte WhatsApp Messenger personnel n'est pas connecté au serveur : pour ce compte, WA Orbit prépare le texte et l'utilisateur le copie et l'envoie manuellement. Meta Cloud API ne donne pas accès aux statuts personnels ; WA Orbit ne scrape pas les statuts et n'utilise pas de client non officiel.
 
 ## Limites de déploiement
 
