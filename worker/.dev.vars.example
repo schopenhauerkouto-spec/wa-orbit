@@ -1,0 +1,10 @@
+# Local Wrangler secrets for development only. Never commit real values.
+ADMIN_API_TOKEN=replace-with-a-long-random-secret
+WHATSAPP_APP_SECRET=replace-with-meta-app-secret
+WHATSAPP_VERIFY_TOKEN=replace-with-a-long-random-verify-token
+WHATSAPP_TEMPLATE_NAME=approved_template_name
+WHATSAPP_TEMPLATE_LANGUAGE=fr
+# Set true only when the approved template has exactly one body text variable.
+WHATSAPP_TEMPLATE_BODY_PARAMETER=false
+# Optional valid JSON matching the exact approved Meta template components.
+# WHATSAPP_TEMPLATE_COMPONENTS_JSON=[]
