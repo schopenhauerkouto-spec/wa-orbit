@@ -44,6 +44,25 @@ export class OrbitClient {
     return this.request("/api/safety");
   }
 
+
+  baileysConfig() {
+    return this.request("/api/connectors/baileys/config");
+  }
+
+  baileysHeartbeat(payload) {
+    return this.request("/api/connectors/baileys/heartbeat", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
+  baileysEvent(payload) {
+    return this.request("/api/connectors/baileys/events", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   approveDraft(id, body) {
     return this.request(`/api/drafts/${id}`, {
       method: "POST",
