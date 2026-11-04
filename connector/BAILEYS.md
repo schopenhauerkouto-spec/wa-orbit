@@ -55,3 +55,31 @@ BAILEYS_CONTROL_POLL_MS=30000
 ```
 
 Le token doit être identique à `BAILEYS_CONNECTOR_TOKEN` du serveur Express et du runner.
+
+## Configuration zéro-friction
+
+Tu n'as plus besoin d'éditer le numéro dans le serveur pour lier WhatsApp.
+
+1. Configure seulement ORBIT_API_URL, BAILEYS_CONNECTOR_TOKEN et BAILEYS_ENABLED=true sur le runner.
+2. Lance npm run connector:baileys.
+3. Ouvre le dashboard WA Orbit et va dans Groupes & modération → Connexion WhatsApp.
+4. Choisis Scanner un QR : le QR apparaît directement dans le dashboard.
+5. Ou choisis Utiliser mon numéro, saisis ton numéro avec l'indicatif pays sans +, puis utilise le code affiché dans WhatsApp.
+6. Après la première liaison, le dossier d'authentification permet une reconnexion sans nouveau QR/code tant que la session reste valide. Voir la documentation Baileys sur la gestion des sessions. citeturn722822search11turn722822search0
+7. Le bouton Réinitialiser la connexion WhatsApp efface la session sur le runner et déclenche un nouveau parcours d'authentification.
+
+Le QR est généré à partir de l'événement connection.update et affiché dans le dashboard plutôt que dans le terminal. C'est le flux recommandé pour intégrer le QR à un frontend. citeturn722822search1
+
+### Numéro de téléphone
+
+Le numéro doit être fourni avec le code pays et uniquement les chiffres, sans +, espaces, parenthèses ni tirets. Le code de liaison est demandé après l'événement de connexion/QR. citeturn722822search0turn510626search2
+
+### Installation Google Cloud
+
+Depuis la VM :
+
+```bash
+sudo bash deploy/google-cloud/setup-baileys.sh
+```
+
+Le script installe Node.js si nécessaire, récupère la branche, installe les dépendances, demande uniquement l'URL du dashboard et le secret de connecteur, puis active le service systemd.
