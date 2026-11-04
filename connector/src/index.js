@@ -37,25 +37,31 @@ export function createConnector(config) {
 
 export async function syncApproved(config, transport) {
   const connector=createConnector(config);
-  const batch=await connector.orbit.drafts("approved");
+  const batch=await connector.orbit.claimActions(Math.min(5,config.batchSize||5));
   const results=[];
-  for(const draft of batch.drafts||[]) {
-    const result=await connector.executeApproved({
-      id:draft.id,
-      phone:draft.phone,
-      body:draft.body,
-      consentStatus:draft.consent_status,
-      approved:true,
-      dailyCount:0,
-      dailyLimit:5
-    });
-    if(result.ok) {
-      await connector.queue.drain(async action => {
-        if(typeof transport.send !== "function") throw new Error("transport.send requis");
-        await transport.send({phone:action.phone,body:action.body});
-      });
+  for(const action of batch.actions||[]) {
+    const safety=await connector.orbit.safety();
+    const paused=safety.paused===true||safety.paused===1;
+    if(paused) {
+      results.push({id:action.id,ok:false,reason:"emergency_pause"});
+      continue;
     }
-    results.push({id:draft.id,...result});
+    let payload={};
+    try { payload=JSON.parse(action.payload_json||"{}"); } catch { payload={}; }
+    if(typeof transport.send !== "function") {
+      await connector.orbit.actionResult(action.id,{status:"failed",error:"transport.send requis"});
+      results.push({id:action.id,ok:false,reason:"transport_missing"});
+      continue;
+    }
+    try {
+      const response=await transport.send({phone:payload.phone||action.phone,body:payload.body||action.body});
+      await connector.orbit.actionResult(action.id,{status:"sent",provider_message_id:response?.messageId||response?.id||null});
+      results.push({id:action.id,ok:true,status:"sent"});
+    } catch(error) {
+      await connector.orbit.actionResult(action.id,{status:"failed",error:String(error?.message||error)});
+      results.push({id:action.id,ok:false,status:"failed",error:String(error?.message||error)});
+    }
+    if(config.minDelayMs) await new Promise(resolve=>setTimeout(resolve,config.minDelayMs));
   }
   return results;
 }
