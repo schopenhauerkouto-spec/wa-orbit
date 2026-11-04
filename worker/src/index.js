@@ -272,7 +272,7 @@ async function handleApi(request, env, url) {
     const body=await readJson(request,16*1024);
     const limit=Math.min(20,Math.max(1,Number(body.limit)||5));
     const rows=await env.DB.prepare("SELECT d.*,c.phone,c.display_name,c.consent_status FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' ORDER BY d.created_at ASC LIMIT ?").bind(limit).all();
-    return json({drafts:rows.results||[]});
+    return json({drafts:rows.results||[], connector_note:"Chaque brouillon doit être revalidé via /api/safety et les règles de consentement juste avant l'envoi."});
   }
   if (request.method === "GET" && url.pathname === "/api/interaction-policy") return json(await getInteractionPolicy(env));
   if (request.method === "POST" && url.pathname === "/api/interaction-policy") {
