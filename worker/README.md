@@ -54,6 +54,8 @@ Le Worker ne transmet pas lui-même les messages : il expose une file d'actions 
 - `GET /health` doit répondre `status: ok` après migration et liaison D1.
 - Tester l'authentification, l'import, le quota, le cooldown, l'opt-out et l'idempotence webhook.
 
+Le texte du message entrant, les notes relationnelles et les thèmes peuvent être transmis à Groq uniquement lorsque GROQ_DRAFTS_ENABLED=true. Les quotas sont enregistrés dans D1. La génération ne déplace jamais un brouillon vers approved.
+
 La migration Cloudflare ne remplace pas la base Supabase DIGIT+ déjà préparée. Cette branche utilise D1 pour que le Worker puisse fonctionner sans exposer de clé privilégiée dans le navigateur.
 
 
@@ -149,6 +151,6 @@ La livraison côté connecteur est de type « au moins une fois » en cas de cra
 
 ## Génération IA facultative
 
-Le Worker sait enrichir les brouillons avec Groq sans approuver ni envoyer le message. La fonctionnalité reste désactivée par défaut (GROQ_DRAFTS_ENABLED=false). Pour l’activer, fournir GROQ_API_KEY comme secret, puis définir GROQ_DRAFTS_ENABLED=true et éventuellement GROQ_MODEL. Le modèle par défaut est openai/gpt-oss-20b.
+Le Worker sait enrichir les brouillons avec Groq sans approuver ni envoyer le message. La fonctionnalité reste désactivée par défaut (GROQ_DRAFTS_ENABLED=false). Le quota de départ est de 30 générations par jour et 3 par contact et par heure ; les valeurs sont configurables dans wrangler.toml. Pour l’activer, fournir GROQ_API_KEY comme secret, puis définir GROQ_DRAFTS_ENABLED=true et éventuellement GROQ_MODEL. Le modèle par défaut est openai/gpt-oss-20b.
 
 Lorsqu’elle est activée, le Worker transmet au fournisseur le texte nécessaire du message entrant ou du statut, ainsi que le contexte relationnel minimal, afin de rédiger une proposition. L’utilisateur doit vérifier et approuver le brouillon avant qu’il puisse rejoindre la file. N’active pas cette option sans tenir compte de la confidentialité, des obligations d’information et des autorisations applicables aux conversations traitées.
