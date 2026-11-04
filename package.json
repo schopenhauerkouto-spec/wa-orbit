@@ -2,7 +2,7 @@
   "name": "wa-orbit-contact-assistant",
   "version": "1.3.0",
   "private": true,
-  "description": "WA Orbit — tableau de bord et bot conversationnel WhatsApp Cloud API + Groq, avec persistance PostgreSQL et contrôles de consentement.",
+  "description": "WA Orbit — assistant relationnel WhatsApp avec connecteur Baileys, persistance D1/PostgreSQL et contrôles de consentement.",
   "type": "module",
   "scripts": {
     "start": "node server.js",
@@ -23,6 +23,8 @@
     "express-session": "^1.18.1",
     "helmet": "^8.0.0",
     "connect-pg-simple": "^10.0.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "@whiskeysockets/baileys": "^7.0.0",
+    "qrcode-terminal": "^0.12.0"
   }
 }
