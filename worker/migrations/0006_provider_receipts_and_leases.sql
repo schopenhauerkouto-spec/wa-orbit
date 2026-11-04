@@ -7,3 +7,5 @@ ALTER TABLE wa_action_queue ADD COLUMN provider_error_json TEXT NOT NULL DEFAULT
 CREATE INDEX IF NOT EXISTS idx_wa_action_queue_provider_message_id
   ON wa_action_queue(provider_message_id)
   WHERE provider_message_id IS NOT NULL;
+ALTER TABLE webhook_statuses ADD COLUMN status_rank INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE wa_action_queue ADD COLUMN provider_status_rank INTEGER NOT NULL DEFAULT 0;
