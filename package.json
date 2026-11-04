@@ -11,7 +11,8 @@
     "check": "node --check server.js && node --check src/group-moderation-policy.js && node --check tests/group-moderation.mjs && node --check public/js/app.js && node --check tests/smoke.mjs && node --check worker/src/index.js && node --check connector/src/policy.js && node --check connector/src/client.js && node --check connector/src/queue.js && node --check connector/src/index.js && node --check connector/src/meta-cloud-transport.js && node --check connector/runner.js",
     "test:smoke": "node tests/smoke.mjs",
     "test:connector": "node tests/connector-smoke.mjs",
-    "test": "npm run check && npm run test:smoke && npm run test:connector && node tests/group-moderation.mjs"
+    "test": "npm run check && npm run test:smoke && npm run test:connector && node tests/group-moderation.mjs",
+    "connector:baileys": "node connector/baileys-runner.js"
   },
   "engines": {
     "node": ">=20 <25"
