@@ -268,6 +268,12 @@ async function handleApi(request, env, url) {
   if (!authorized(request, env)) return json({ error: "Authentification requise." }, 401);
   if (request.method === "GET" && url.pathname === "/api/personality") return getPersonality(env);
   if (request.method === "GET" && url.pathname === "/api/drafts") return listDrafts(env,url);
+  if (request.method === "POST" && url.pathname === "/api/drafts/claim") {
+    const body=await readJson(request,16*1024);
+    const limit=Math.min(20,Math.max(1,Number(body.limit)||5));
+    const rows=await env.DB.prepare("SELECT d.*,c.phone,c.display_name,c.consent_status FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' ORDER BY d.created_at ASC LIMIT ?").bind(limit).all();
+    return json({drafts:rows.results||[]});
+  }
   if (request.method === "GET" && url.pathname === "/api/interaction-policy") return json(await getInteractionPolicy(env));
   if (request.method === "POST" && url.pathname === "/api/interaction-policy") {
     const b=await readJson(request), p=await getInteractionPolicy(env);
