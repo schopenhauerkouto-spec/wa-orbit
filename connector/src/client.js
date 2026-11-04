@@ -22,6 +22,20 @@ export class OrbitClient {
     return this.request(`/api/drafts?status=${encodeURIComponent(status)}`);
   }
 
+  claimActions(limit = 5) {
+    return this.request("/api/actions/claim", {
+      method: "POST",
+      body: JSON.stringify({limit})
+    });
+  }
+
+  actionResult(id, payload) {
+    return this.request(`/api/actions/${id}/result`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   safety() {
     return this.request("/api/safety");
   }
