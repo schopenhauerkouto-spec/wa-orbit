@@ -26,20 +26,24 @@ WA Orbit est une application monoposte de gestion de contacts et de conversation
 - Meta WhatsApp Cloud API
 - Groq Chat Completions (`openai/gpt-oss-20b` par défaut)
 
-## Déploiement Cloudflare Workers (migration en cours)
+## Architecture Cloudflare Workers + D1 (migration en cours)
 
-Le projet comporte maintenant une première fondation Cloudflare dans `worker/` avec :
-- un endpoint de santé `/health` ;
-- la vérification Meta `GET /webhook` ;
-- la réception sécurisée des webhooks `POST /webhook` avec validation HMAC SHA-256 ;
-- le stockage idempotent des messages et statuts dans Cloudflare D1 ;
-- le service des fichiers statiques via Workers Assets.
+Le répertoire `worker/` contient désormais un backend D1 distinct du serveur historique Express :
+- API admin pour contacts, consentement, cooldown, personnalité, profils relationnels et intérêts ;
+- webhook Meta signé HMAC SHA-256, déduplication des messages entrants et mémoire conversationnelle ;
+- moteur de décision des statuts, brouillons et budget social ;
+- pause d'urgence persistante et file d'actions approuvées ;
+- baux de traitement récupérables, retry progressif et audit ;
+- rapprochement des reçus Meta `sent`, `delivered`, `read` et `failed` ;
+- contrôle de la fenêtre de service de 24 h et routage vers modèle approuvé hors fenêtre.
 
-**Important : cette fondation n'est pas encore un déploiement complet de WA Orbit.** Les routes du tableau de bord `/api/*`, l'authentification, la gestion des contacts, les conversations, les contrôles de sécurité, l'envoi WhatsApp et Groq doivent encore être migrés. Tant que cette migration n'est pas terminée, le tableau de bord ne sera pas pleinement fonctionnel sur Cloudflare et les réponses automatiques restent désactivées.
+Le processus `connector/` transmet les actions via Meta Cloud API. Il se lance avec `npm run connector:worker` et doit être déployé séparément comme Background Worker Render. Les secrets restent côté serveur.
 
-Consulte [worker/README.md](worker/README.md) pour la préparation Cloudflare, D1, les secrets et le déploiement.
+**La migration du tableau de bord n'est pas terminée :** le frontend actuel appelle encore les routes de session de l'application Express (`/api/config`, `/api/events`, etc.). Il n'est donc pas encore raccordé à toutes les routes admin du Worker. La voie Express reste l'application web historique ; la voie Cloudflare/D1 est un backend distinct en cours d'intégration.
 
-Le déploiement Render décrit dans l'historique reste une option Node.js/Express distincte ; il n'est pas nécessaire pour la voie Cloudflare.
+Consulte [worker/README.md](worker/README.md) et [connector/README.md](connector/README.md) pour les migrations, secrets, règles Meta et déploiement.
+
+**Limite produit :** Meta Cloud API ne donne pas accès aux statuts personnels d'un compte WhatsApp classique. Le moteur d'analyse de statuts attend un connecteur séparé compatible et autorisé ; il ne contourne pas les protections de WhatsApp.
 
 ## Limites de déploiement
 
