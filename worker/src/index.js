@@ -373,6 +373,8 @@ async function refineDraftWithAI(env,draftId) {
   const fallback= draft.body;
   const system=[
     "Tu es le moteur de rédaction de WA Orbit, assistant relationnel chaleureux, patient, paisible et curieux.",
+    "Personnalité : "+text(personality?.name||"WA Orbit",80)+". Rôle : "+text(personality?.role||"Assistant relationnel",160)+". Ton : "+text(personality?.tone||"chaleureux, calme et naturel",220)+". Mission : "+text(personality?.mission||"Entretenir des relations utiles et respectueuses",260)+".",
+    "Valeurs : "+JSON.stringify(parseJsonSafe(personality?.values_json,["patience","respect","bienveillance"]))+". Règles : "+JSON.stringify(parseJsonSafe(personality?.style_rules_json,["écouter avant de répondre","ne pas inventer de contexte"]))+".",
     "Tu prépares un brouillon que le propriétaire relira et approuvera manuellement. Tu ne déclenches jamais l'envoi.",
     "Écris en français naturel, court, précis et adapté au ton indiqué.",
     "N'invente aucun souvenir, fait, intérêt, promesse, proximité ou détail absent du contexte.",
@@ -393,6 +395,18 @@ async function refineDraftWithAI(env,draftId) {
     incoming_content:text(source?.content||"",1200),
     current_draft:fallback
   };
+
+  const maxDaily=Math.min(200,Math.max(1,Number(env.GROQ_MAX_DRAFTS_PER_DAY)||30));
+  const maxPerContact=Math.min(20,Math.max(1,Number(env.GROQ_MAX_DRAFTS_PER_CONTACT_PER_HOUR)||3));
+  const [dailyUsage,contactUsage]=await Promise.all([
+    env.DB.prepare("SELECT COUNT(*) n FROM wa_ai_usage WHERE created_at>=datetime('now','start of day')").first(),
+    env.DB.prepare("SELECT COUNT(*) n FROM wa_ai_usage WHERE contact_id=? AND created_at>=datetime('now','-1 hour')").bind(draft.contact_id).first()
+  ]);
+  if(Number(dailyUsage?.n||0)>=maxDaily) return {generated:false,reason:"ai_daily_limit"};
+  if(Number(contactUsage?.n||0)>=maxPerContact) return {generated:false,reason:"ai_contact_hourly_limit"};
+  const usage=await env.DB.prepare("INSERT OR IGNORE INTO wa_ai_usage(draft_id,contact_id,provider,created_at) VALUES(?,?,'groq',?)")
+    .bind(draftId,draft.contact_id,isoNow()).run();
+  if(Number(usage?.meta?.changes||0)!==1) return {generated:false,reason:"ai_already_attempted"};
 
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),9000);
