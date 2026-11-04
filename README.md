@@ -37,13 +37,23 @@ Le répertoire `worker/` contient désormais un backend D1 distinct du serveur h
 - rapprochement des reçus Meta `sent`, `delivered`, `read` et `failed` ;
 - contrôle de la fenêtre de service de 24 h et routage vers modèle approuvé hors fenêtre.
 
-Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et doit être déployé séparément comme Background Worker Render. Les secrets restent côté serveur. Le connecteur ne prend pas en charge Baileys ni un client non officiel pour un compte personnel.
+Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et devra être déployé comme processus Node.js persistant sur une VM compatible (le candidat gratuit étudié est Google Cloud e2-micro, sous réserve de quotas et de facturation). Les secrets restent côté serveur. Le connecteur ne prend pas en charge Baileys ni un client non officiel pour un compte personnel.
 
 **La migration du tableau de bord n'est pas terminée :** le frontend actuel appelle encore les routes de session de l'application Express (`/api/config`, `/api/events`, etc.). Il n'est donc pas encore raccordé à toutes les routes admin du Worker. La voie Express reste l'application web historique ; la voie Cloudflare/D1 est un backend distinct en cours d'intégration.
 
 Consulte [worker/README.md](worker/README.md) et [connector/README.md](connector/README.md) pour les migrations, secrets, règles Meta et déploiement.
 
 **Limites produit :** un compte WhatsApp Messenger personnel n'est pas connecté au serveur : pour ce compte, WA Orbit prépare le texte et l'utilisateur le copie et l'envoie manuellement. Meta Cloud API ne donne pas accès aux statuts personnels ; WA Orbit ne scrape pas les statuts et n'utilise pas de client non officiel.
+
+## Groupes & modération (configuration/simulation)
+
+Le tableau de bord comprend un panneau de configuration des règles de groupe : détection des liens, listes de domaines autorisés/interdits, anti-flood, répétitions, exemptions d'administrateurs et seuil d'avertissement. Le moteur de règles est isolé du transport et dispose de tests unitaires.
+
+**État actuel : simulation uniquement.** Aucun connecteur de groupes WhatsApp n'est branché, aucune action ne supprime un message ou ne sanctionne un membre. Les capacités de groupe varient selon le type de compte et l'API disponible ; la Groups API officielle n'est pas un accès universel aux groupes personnels existants. Voir [docs/groups-and-moderation.md](docs/groups-and-moderation.md).
+
+## Hébergement persistant sans Oracle
+
+Oracle Cloud est exclu du plan. Le candidat gratuit restant évalué est Google Cloud Compute Engine e2-micro Always Free, mais il est limité à environ 1 Go de RAM, un trafic sortant mensuel très faible et exige un compte Cloud Billing actif. Il ne s'agit pas d'une garantie de coût nul ni d'un SLA. La VM serait réservée au runner Node.js léger ; Cloudflare resterait chargé de l'API/D1 et l'IA distante. Voir [docs/hosting/google-cloud-free-tier.md](docs/hosting/google-cloud-free-tier.md).
 
 ## Limites de déploiement
 
@@ -83,7 +93,7 @@ Ouvre `http://127.0.0.1:3000` et connecte-toi avec `ADMIN_PASSWORD`.
 | `BOT_PERSONA` | Ton et comportement général du bot |
 | `BOT_BUSINESS_CONTEXT` | Informations vérifiées sur l'activité |
 
-Les secrets se configurent dans Render Environment ou dans `.env` en local. Ils ne doivent jamais se trouver dans `public/`.
+Les secrets se configurent dans le gestionnaire de secrets de l'hébergeur ou dans `.env` en local. Ils ne doivent jamais se trouver dans `public/`.
 
 ## Limiteur Groq
 
