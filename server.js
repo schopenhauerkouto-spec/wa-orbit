@@ -691,6 +691,7 @@ function baileysControlSnapshot() {
   return {
     mode: setup.mode === 'pairing' ? 'pairing' : 'qr',
     pairingNumber: setup.pairingNumber || '',
+    resetRequestedAt: setup.resetRequestedAt || null,
     updatedAt: setup.updatedAt || null,
     status: baileysLive.status,
     qrDataUrl: baileysLive.qrDataUrl || '',
@@ -819,6 +820,10 @@ app.post('/api/connectors/baileys/pairing-update', requireConnectorToken, async 
     baileysLive.qrDataUrl = '';
   }
   baileysLive.lastError = error || null;
+  if (status === 'reset-complete') {
+    db.baileysSetup.resetRequestedAt = null;
+    await saveDb();
+  }
   res.json({ ok: true });
 });
 
