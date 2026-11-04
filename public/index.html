@@ -159,6 +159,29 @@
           <strong>Mode configuration / simulation uniquement</strong>
           <p id="groupTransportState">Aucun connecteur de groupes n'est actif. Les règles sont enregistrées et testables, mais aucune suppression de message, sanction ou expulsion n'est exécutée.</p>
         </div>
+        <article class="panel baileys-setup-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">CONNEXION WHATSAPP</p><h3>Baileys — configuration express</h3></div>
+            <span id="baileysSetupState" class="setup-badge">Hors ligne</span>
+          </div>
+          <p class="field-hint">Choisis <strong>QR</strong> pour scanner avec WhatsApp, ou <strong>Numéro</strong> pour recevoir un code de liaison. Les identifiants restent sur le serveur.</p>
+          <div class="baileys-setup-grid">
+            <div>
+              <div class="segmented">
+                <label><input type="radio" name="baileysSetupMode" value="qr" checked><span>Scanner un QR</span></label>
+                <label><input type="radio" name="baileysSetupMode" value="pairing"><span>Utiliser mon numéro</span></label>
+              </div>
+              <label class="baileys-number-field" for="baileysPairingNumber">Numéro WhatsApp (code pays + chiffres)<input id="baileysPairingNumber" inputmode="numeric" autocomplete="tel" placeholder="2250700000000" maxlength="15"></label>
+              <button class="btn btn-primary full" id="saveBaileysSetupBtn" type="button">Enregistrer le mode de connexion</button>
+              <button class="btn btn-outline full" id="resetBaileysBtn" type="button">Réinitialiser la connexion WhatsApp</button>
+              <p id="baileysSetupHelp" class="field-hint">Après l’enregistrement, le connecteur attendra la prochaine étape d’authentification.</p>
+            </div>
+            <div class="baileys-pair-box">
+              <div id="baileysQrWrap" class="baileys-qr-wrap"><div class="baileys-qr-placeholder">QR en attente…</div></div>
+              <div id="baileysPairCodeWrap" class="baileys-pair-code hidden"><span>CODE DE LIAISON</span><strong id="baileysPairCode">—</strong><small>WhatsApp → Appareils liés → Lier avec un numéro</small></div>
+            </div>
+          </div>
+        </article>
         <form id="groupModerationForm" class="group-config-grid">
           <article class="panel group-config-card">
             <div class="panel-heading"><div><p class="eyebrow">CONTRÔLE GLOBAL</p><h3>État de la modération</h3></div><span class="settings-logo purple">♧</span></div>
@@ -203,7 +226,7 @@
             <button class="btn btn-outline" type="submit">Analyser le message</button>
           </form>
           <pre id="groupSimulationResult" class="group-simulation-result" aria-live="polite">Le résultat de la simulation apparaîtra ici.</pre>
-          <p class="field-hint">Une décision « supprimer le message » est seulement une recommandation. Le connecteur actuel ne possède pas cette capacité de modération des groupes.</p>
+          <p class="field-hint">En mode réel, la suppression n’est exécutée que si Baileys est connecté, que le bot est administrateur, que l’enforcement est activé et que l’arrêt d’urgence est levé.</p>
         </article>
       </section>
 
