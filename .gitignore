@@ -6,3 +6,4 @@ node_modules/
 npm-debug.log*
 data/db.json
 *.log
+\n.baileys-auth/\n
