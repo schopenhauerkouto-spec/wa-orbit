@@ -341,10 +341,14 @@ function renderGroupModeration() {
   $('#groupWarningsEnabled').checked = p.warnings?.enabled !== false;
   $('#groupWarningThreshold').value = p.warnings?.threshold ?? 3;
   const connector = data.connector || {};
-  $('#groupTransportState').textContent = connector.liveEnforcement
-    ? 'Connecteur de groupes déclaré actif. Les capacités réelles doivent encore être confirmées pour chaque groupe.'
-    : 'Aucun connecteur de groupes n’est actif. Les règles sont enregistrées et testables, mais aucune suppression de message, sanction ou expulsion n’est exécutée.';
-  $('#groupPolicyFeedback').textContent = p.enabled ? 'Moteur activé pour la simulation ; aucun groupe réel n’est connecté.' : 'Moteur désactivé au démarrage.';
+  $('#groupTransportState').textContent = connector.connected
+    ? (connector.liveEnforcement
+      ? 'Baileys connecté : l’enforcement est armé. La suppression exige que le bot soit administrateur du groupe.'
+      : 'Baileys connecté, mais l’enforcement live est désactivé. Les décisions restent en observation.')
+    : 'Aucun connecteur de groupes n’est actif. Les règles restent en configuration/simulation.';
+  $('#groupPolicyFeedback').textContent = p.enabled
+    ? (connector.connected ? 'Moteur actif : vérifie le mode et les droits du bot avant toute enforcement.' : 'Moteur activé, mais aucun connecteur réel n’est connecté.')
+    : 'Moteur désactivé au démarrage.';
 }
 
 function groupPolicyPayload() {
@@ -694,7 +698,7 @@ function bindEvents() {
       });
       state.groupModeration = { ...state.groupModeration, policy: response.policy };
       renderGroupModeration();
-      toast('Règles de modération enregistrées. Aucun groupe réel n’est encore connecté.');
+      toast('Règles de modération enregistrées.');
     } catch (error) {
       toast(error.message);
     } finally {
