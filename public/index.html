@@ -41,6 +41,7 @@
         <button class="nav-item active" data-page="overview"><span class="nav-icon">◫</span>Vue d'ensemble</button>
         <button class="nav-item" data-page="contacts"><span class="nav-icon">♙</span>Contacts <span id="navContactCount" class="nav-count">0</span></button>
         <button class="nav-item" data-page="inbox"><span class="nav-icon">▤</span>Conversations <span id="navInboxCount" class="nav-count subtle">0</span></button>
+        <button class="nav-item" data-page="groups"><span class="nav-icon">♧</span>Groupes & modération</button>
         <button class="nav-item" data-page="campaigns"><span class="nav-icon">↗</span>Messages</button>
         <button class="nav-item" data-page="status"><span class="nav-icon">◉</span>Statuts</button>
       </nav>
@@ -148,6 +149,64 @@
         <div class="status-cards"><article class="panel"><span class="stat-icon green">✓</span><h3>Ce que tu peux faire</h3><p>Publier tes propres statuts depuis WhatsApp et consulter les vues directement dans l’application, selon les paramètres de confidentialité et confirmations de lecture.</p></article><article class="panel"><span class="stat-icon orange">⊘</span><h3>Ce que l’API ne fait pas</h3><p>Lire les statuts des contacts, forcer une vue, simuler des vues ou exposer la liste des personnes ayant regardé un statut tiers.</p></article></div>
       </section>
 
+      <section id="page-groups" class="page">
+        <div class="page-heading">
+          <p class="eyebrow">ADMINISTRATION DES COMMUNAUTÉS</p>
+          <h1>Groupes & <span>modération.</span></h1>
+          <p class="muted">Configure les règles de contrôle et teste leurs décisions sans toucher à un vrai groupe.</p>
+        </div>
+        <div class="group-transport-warning">
+          <strong>Mode configuration / simulation uniquement</strong>
+          <p id="groupTransportState">Aucun connecteur de groupes n'est actif. Les règles sont enregistrées et testables, mais aucune suppression de message, sanction ou expulsion n'est exécutée.</p>
+        </div>
+        <form id="groupModerationForm" class="group-config-grid">
+          <article class="panel group-config-card">
+            <div class="panel-heading"><div><p class="eyebrow">CONTRÔLE GLOBAL</p><h3>État de la modération</h3></div><span class="settings-logo purple">♧</span></div>
+            <label class="group-toggle"><input id="groupPolicyEnabled" type="checkbox"><span><strong>Activer le moteur de règles</strong><small>Active l'analyse en simulation et prépare la politique pour un futur connecteur compatible.</small></span></label>
+            <label for="groupPolicyMode">Mode souhaité</label>
+            <select id="groupPolicyMode" class="filter-select"><option value="observe">Observation</option><option value="enforce">Application (en attente d'un connecteur)</option></select>
+            <label class="group-toggle"><input id="groupExemptAdmins" type="checkbox"><span><strong>Exempter les administrateurs</strong><small>Les administrateurs du groupe ne déclenchent pas les règles automatiques.</small></span></label>
+          </article>
+          <article class="panel group-config-card">
+            <div class="panel-heading"><div><p class="eyebrow">ANTI-LIENS</p><h3>Contrôle des URL</h3></div><span class="settings-logo gold">↗</span></div>
+            <label class="group-toggle"><input id="groupLinksEnabled" type="checkbox"><span><strong>Détecter les liens</strong><small>Analyse les URL présentes dans un message.</small></span></label>
+            <label class="group-toggle"><input id="groupAllowAnyLinks" type="checkbox"><span><strong>Autoriser tous les domaines sauf blacklist</strong><small>Sinon, seuls les domaines de la liste blanche passent.</small></span></label>
+            <label class="group-toggle"><input id="groupAllowAdminLinks" type="checkbox"><span><strong>Autoriser les liens des admins</strong><small>Exception spécifique à la règle anti-liens.</small></span></label>
+            <label for="groupAllowedDomains">Domaines autorisés (un par ligne)</label>
+            <textarea id="groupAllowedDomains" rows="3" maxlength="3000" placeholder="youtube.com&#10;github.com"></textarea>
+            <label for="groupBlockedDomains">Domaines bloqués (un par ligne)</label>
+            <textarea id="groupBlockedDomains" rows="3" maxlength="3000" placeholder="exemple-dangereux.com"></textarea>
+          </article>
+          <article class="panel group-config-card">
+            <div class="panel-heading"><div><p class="eyebrow">ANTI-FLOOD</p><h3>Cadence des messages</h3></div><span class="settings-logo purple">≋</span></div>
+            <label class="group-toggle"><input id="groupFloodEnabled" type="checkbox"><span><strong>Détecter le flood</strong><small>Repère un volume inhabituel de messages par membre.</small></span></label>
+            <div class="group-number-row"><label for="groupFloodMax">Messages maximum<input id="groupFloodMax" type="number" min="2" max="100" step="1"></label><label for="groupFloodWindow">Fenêtre (secondes)<input id="groupFloodWindow" type="number" min="3" max="300" step="1"></label></div>
+          </article>
+          <article class="panel group-config-card">
+            <div class="panel-heading"><div><p class="eyebrow">ANTI-RÉPÉTITION</p><h3>Messages identiques</h3></div><span class="settings-logo gold">⟳</span></div>
+            <label class="group-toggle"><input id="groupRepeatsEnabled" type="checkbox"><span><strong>Détecter les répétitions</strong><small>Normalise les espaces, accents et ponctuations avant comparaison.</small></span></label>
+            <div class="group-number-row"><label for="groupRepeatMax">Répétitions maximum<input id="groupRepeatMax" type="number" min="2" max="50" step="1"></label><label for="groupRepeatWindow">Fenêtre (secondes)<input id="groupRepeatWindow" type="number" min="5" max="3600" step="1"></label></div>
+          </article>
+          <article class="panel group-config-card">
+            <div class="panel-heading"><div><p class="eyebrow">AVERTISSEMENTS</p><h3>Seuils de modération</h3></div><span class="settings-logo purple">⚑</span></div>
+            <label class="group-toggle"><input id="groupWarningsEnabled" type="checkbox"><span><strong>Préparer un système d'avertissements</strong><small>Paramètre conservé pour le futur adaptateur ; aucun avertissement n'est publié par cette version.</small></span></label>
+            <label for="groupWarningThreshold">Nombre d'infractions avant escalade<input id="groupWarningThreshold" type="number" min="1" max="10" step="1"></label>
+          </article>
+          <div class="group-form-footer"><span id="groupPolicyFeedback" role="status">Modération désactivée au démarrage.</span><button class="btn btn-primary" type="submit">Enregistrer la configuration</button></div>
+        </form>
+        <article class="panel group-simulator">
+          <div class="panel-heading"><div><p class="eyebrow">LABORATOIRE SANS RISQUE</p><h3>Simuler une règle</h3></div><span class="settings-logo gold">⌁</span></div>
+          <form id="groupSimulationForm" class="group-simulation-form">
+            <label for="groupSimulationText">Message à analyser</label>
+            <textarea id="groupSimulationText" rows="3" maxlength="4096" placeholder="Ex. Cliquez ici : https://site-exemple.com" required></textarea>
+            <label class="group-toggle"><input id="groupSimulationAdmin" type="checkbox"><span><strong>Simuler un message d'administrateur</strong></span></label>
+            <button class="btn btn-outline" type="submit">Analyser le message</button>
+          </form>
+          <pre id="groupSimulationResult" class="group-simulation-result" aria-live="polite">Le résultat de la simulation apparaîtra ici.</pre>
+          <p class="field-hint">Une décision « supprimer le message » est seulement une recommandation. Le connecteur actuel ne possède pas cette capacité de modération des groupes.</p>
+        </article>
+      </section>
+
       <section id="page-settings" class="page">
         <div class="page-heading"><p class="eyebrow">CENTRE DE CONFIGURATION</p><h1>Paramètres & <span>intégrations.</span></h1><p class="muted">Les clés restent dans le fichier .env côté serveur. Ne les colle jamais dans le navigateur.</p></div>
         <div class="settings-grid"><article class="panel settings-card"><article class="panel settings-card safety-control-card"><div class="panel-heading"><div><p class="eyebrow">CONTRÔLE PRIORITAIRE</p><h3>Arrêt d’urgence</h3></div><span class="settings-logo gold">⏸</span></div><div id="safetyState" class="integration-state pending"><span></span><strong>Vérification du système…</strong></div><p>La pause bloque les nouveaux messages sortants et les réponses automatiques. Elle ne déconnecte pas WhatsApp et ne supprime aucune donnée.</p><div class="config-rows"><div><span>Mode</span><strong id="safetyModeLabel">Pause sécurisée</strong></div><div><span>Dernière modification</span><strong id="safetyUpdatedLabel">—</strong></div></div><button class="btn btn-primary full" id="safetyToggleBtn" type="button">Reprendre après vérification</button></article><div class="panel-heading"><div><p class="eyebrow">META BUSINESS</p><h3>WhatsApp Cloud API</h3></div><span class="settings-logo">◉</span></div><div id="whatsappSettingsState" class="integration-state pending"><span></span><strong>Configuration à vérifier</strong></div><p>Le serveur attend un access token, un Phone Number ID et une version Graph API valide.</p><div class="config-rows"><div><span>Access token</span><strong id="tokenPresence">Non détecté</strong></div><div><span>Phone Number ID</span><strong id="phoneIdPresence">Non détecté</strong></div><div><span>Version API</span><strong id="versionPresence">Non détectée</strong></div></div><button class="btn btn-outline full" id="recheckConfigBtn">Vérifier la configuration ↻</button></article><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">WEBHOOK</p><h3>Réception des messages</h3></div><span class="settings-logo purple">⌁</span></div><p>Meta doit pouvoir joindre cette URL publique en HTTPS. En local, un tunnel de développement est nécessaire pour tester les webhooks.</p><div class="webhook-url" id="webhookUrl">http://localhost:3000/webhook</div><p class="field-hint" id="webhookReadiness">App Secret et Verify Token à configurer côté serveur.</p><button class="btn btn-ghost full" id="copyWebhookBtn">Copier l’URL ↗</button></article><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">GÉNÉRATION DE TEXTE</p><h3>Assistant Groq</h3></div><span class="settings-logo gold">✦</span></div><div id="aiSettingsState" class="integration-state pending"><span></span><strong>IA facultative non configurée</strong></div><p>Groq prépare les réponses du bot. Les commandes simples sont traitées localement pour économiser les appels IA.</p><div class="config-rows"><div><span>Clé Groq</span><strong id="aiKeyPresence">Non détectée</strong></div><div><span>Modèle</span><strong id="aiModelPresence">Non détecté</strong></div><div><span>Réponses automatiques</span><strong id="autoReplyPresence">Désactivées</strong></div></div><button class="btn btn-outline full" id="aiHelpBtn">Voir le guide de configuration</button></article><article class="panel settings-card"><div class="panel-heading"><div><p class="eyebrow">STOCKAGE</p><h3>Base de données</h3></div><span class="settings-logo purple">▤</span></div><div id="databaseSettingsState" class="integration-state pending"><span></span><strong>Vérification du stockage</strong></div><p>Les contacts, conversations et compteurs IA sont enregistrés dans PostgreSQL lorsque la base distante est configurée.</p><div class="config-rows"><div><span>Mode actif</span><strong id="storageModeLabel">—</strong></div><div><span>Sessions admin</span><strong id="sessionStorageLabel">—</strong></div></div></article></div>
@@ -160,7 +219,7 @@
   </div>
 
   <nav class="mobile-nav" aria-label="Navigation mobile">
-    <button class="active" data-page="overview"><span>◫</span><small>Accueil</small></button><button data-page="contacts"><span>♙</span><small>Contacts</small></button><button data-page="inbox"><span>▤</span><small>Inbox</small></button><button data-page="campaigns"><span>↗</span><small>Messages</small></button><button data-page="settings"><span>⚙</span><small>Réglages</small></button>
+    <button class="active" data-page="overview"><span>◫</span><small>Accueil</small></button><button data-page="contacts"><span>♙</span><small>Contacts</small></button><button data-page="inbox"><span>▤</span><small>Inbox</small></button><button data-page="campaigns"><span>↗</span><small>Messages</small></button><button data-page="groups"><span>♧</span><small>Groupes</small></button><button data-page="settings"><span>⚙</span><small>Réglages</small></button>
   </nav>
 
   <dialog id="contactDialog" class="modal">
