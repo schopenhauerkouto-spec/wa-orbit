@@ -89,6 +89,14 @@ export class BaileysGroupConnector {
     }
   }
 
+  async publishPairingUpdate(payload) {
+    try {
+      await this.orbit.baileysPairingUpdate(payload);
+    } catch (error) {
+      console.error("WA Orbit pairing status error:", String(error?.message || error));
+    }
+  }
+
   remember(jid, item) {
     const list = this.history.get(jid) || [];
     list.push(item);
