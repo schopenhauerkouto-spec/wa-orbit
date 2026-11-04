@@ -254,35 +254,61 @@ export class BaileysGroupConnector {
       auth: state,
       browser: Browsers.ubuntu("WA Orbit"),
       markOnlineOnConnect: false,
-      syncFullHistory: false
+      syncFullHistory: false,
+      printQRInTerminal: false
     });
 
     this.socket = socket;
     socket.ev.on("creds.update", saveCreds);
 
     socket.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
-      if (qr && !state.creds.registered && this.pairingNumber && !this.pairingRequested) {
-        this.pairingRequested = true;
-        try {
-          const code = await socket.requestPairingCode(this.pairingNumber);
-          console.info("WA Orbit Baileys pairing code:", code);
-        } catch (error) {
-          this.pairingRequested = false;
-          console.error("Impossible de générer le code d'appairage:", String(error?.message || error));
+      if (qr && !state.creds.registered) {
+        const mode = this.setup?.mode === "pairing" ? "pairing" : "qr";
+        if (mode === "pairing" && this.setup?.pairingNumber && !this.pairingRequested) {
+          this.pairingRequested = true;
+          try {
+            const number = String(this.setup.pairingNumber).replace(/\D/g, "");
+            const code = await socket.requestPairingCode(number);
+            console.info("WA Orbit Baileys pairing code:", code);
+            await this.publishPairingUpdate({ status: "pairing_code", pairingCode: code, error: "" });
+          } catch (error) {
+            this.pairingRequested = false;
+            const message = String(error?.message || error).slice(0, 500);
+            console.error("Impossible de générer le code d'appairage:", message);
+            await this.publishPairingUpdate({ status: "error", error: message });
+          }
+        } else if (mode === "qr") {
+          try {
+            const qrDataUrl = await QRCode.toDataURL(qr, {
+              type: "image/png",
+              width: 360,
+              margin: 1,
+              errorCorrectionLevel: "M"
+            });
+            await this.publishPairingUpdate({ status: "qr", qrDataUrl, error: "" });
+          } catch (error) {
+            const message = String(error?.message || error).slice(0, 500);
+            await this.publishPairingUpdate({ status: "error", error: message });
+          }
         }
       }
 
       if (connection === "open") {
         this.pairingRequested = false;
         console.info("WA Orbit Baileys connecté:", socket.user?.id || "unknown");
+        await this.publishPairingUpdate({ status: "connected", pairingCode: "", qrDataUrl: "", error: "" });
         await this.heartbeat(true);
       }
 
-      if (connection === "close" && !this.stopping) {
+      if (connection === "close" && !this.stopping && !this.resetting) {
         await this.heartbeat(false);
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         if (statusCode === DisconnectReason.loggedOut) {
-          console.error("Session Baileys déconnectée définitivement. Supprime l'auth state puis ré-appaire le compte.");
+          console.error("Session Baileys déconnectée définitivement. Réinitialise la connexion depuis le dashboard.");
+          await this.publishPairingUpdate({
+            status: "logged_out",
+            error: "Session WhatsApp révoquée. Réinitialisation requise."
+          });
           return;
         }
         console.warn("Baileys déconnecté; reconnexion dans 5 s.");
