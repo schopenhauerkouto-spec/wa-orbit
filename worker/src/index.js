@@ -99,6 +99,7 @@ async function handleWebhook(request, env) {
         if (contact && body) {
           const topics = detectTopics(body);
           if (contact.consent_status === "opted_in") {
+            await learnContactTopics(env, contact.id, topics, 8);
             const previous = await env.DB.prepare(
               "SELECT summary, last_topics_json FROM wa_conversation_memory WHERE contact_id=?"
             ).bind(contact.id).first();
@@ -316,9 +317,20 @@ async function updateContactProfile(request, env, id) {
 function parseJsonSafe(value, fallback) { try { return JSON.parse(value || ''); } catch { return fallback; } }
 const TOPIC_KEYWORDS = { basketball:['basket','nba','basketball','lakers','warriors','curry','lebron','giannis'], business:['business','entreprise','commerce','vente','marketing','startup','argent','investissement'], technology:['tech','technologie','ia','intelligence artificielle','iphone','android','code','programmation'], football:['football','ligue','champions','premier league','real madrid','barça','psg'], studies:['cours','examen','université','études','devoir','révision'], travel:['voyage','vacances','plage','avion','hôtel'], music:['musique','concert','artiste','rap','album','chanson'] };
 function detectTopics(value) { const s=String(value||'').toLowerCase(); return Object.entries(TOPIC_KEYWORDS).filter(function(x){return x[1].some(function(w){return s.includes(w);});}).map(function(x){return x[0];}); }
-function topicInterest(topics, profileTopics) { if (!topics.length) return 25; const scores=profileTopics&&typeof profileTopics==='object'?profileTopics:{}; return Math.round(topics.map(function(t){return Math.min(100,Math.max(0,Number(scores[t])||0));}).reduce(function(a,b){return a+b;},0)/topics.length); }
+function topicInterest(topics, profileTopics) { if (!topics.length) return 25; const scores=profileTopics&&typeof profileTopics==='object'?profileTopics:{}; return Math.round(topics.map(function(t){const v=Number(scores[t]);return Math.min(100,Math.max(0,Number.isFinite(v)?v:55));}).reduce(function(a,b){return a+b;},0)/topics.length); }
 async function getInteractionPolicy(env) { return await env.DB.prepare('SELECT * FROM wa_interaction_policy WHERE id=1').first() || {status_reply_threshold:72,status_reaction_threshold:58,status_remember_threshold:45,max_status_interactions_per_contact_7d:3,min_hours_between_status_interactions:24,social_energy_daily:10}; }
 async function ensureInterestProfile(env,id) { await env.DB.prepare('INSERT OR IGNORE INTO wa_interest_profiles(contact_id,updated_at) VALUES(?,?)').bind(id,isoNow()).run(); return env.DB.prepare('SELECT * FROM wa_interest_profiles WHERE contact_id=?').bind(id).first(); }
+async function learnContactTopics(env,id,topics,increment=8) {
+  if(!Array.isArray(topics)||!topics.length) return;
+  const profile=await ensureInterestProfile(env,id);
+  const scores=parseJsonSafe(profile?.topics_json,{});
+  for(const topic of topics){
+    const current=Number(scores[topic]);
+    scores[topic]=Math.min(100,Math.max(0,Number.isFinite(current)?current:55)+increment);
+  }
+  await env.DB.prepare("UPDATE wa_interest_profiles SET topics_json=?,updated_at=? WHERE contact_id=?")
+    .bind(JSON.stringify(scores),isoNow(),id).run();
+}
 function chooseStatusDecision(x) { const score=Math.round(x.interest*0.55+x.relationship*0.30+(x.hasConversation?15:0)-Math.min(20,x.recentCount*7)); if(x.dailyCount>=x.policy.social_energy_daily)return {decision:'view',score:score,reason:'social_energy_daily_reached'}; if(x.recentCount>=x.policy.max_status_interactions_per_contact_7d)return {decision:'ignore',score:score,reason:'interaction_budget_reached'}; if(x.hoursSinceLast<x.policy.min_hours_between_status_interactions)return {decision:'view',score:score,reason:'cooldown_between_status_interactions'}; if(score>=x.policy.status_reply_threshold)return {decision:x.hasConversation?'continue':'reply',score:score,reason:'high_relevance'}; if(score>=x.policy.status_reaction_threshold)return {decision:'react',score:score,reason:'good_relevance_low_pressure'}; if(score>=x.policy.status_remember_threshold)return {decision:'remember',score:score,reason:'interesting_for_later'}; return {decision:'ignore',score:score,reason:'low_relevance'}; }
 async function createDraft(env,x) {
   if (x.sourceId) {
@@ -390,6 +402,7 @@ async function ingestStatus(request,env) {
       results.push({accepted:true,duplicate:true,external_id:externalId,decision:"already_processed"});
       continue;
     }
+    await learnContactTopics(env,contact.id,topics,4);
     if(choice.decision==="reply"||choice.decision==="continue"){
       await createDraft(env,{contactId:contact.id,sourceType:"status",sourceId:externalId,intent:choice.decision==="continue"?"continue_conversation":"comment_on_status",body:makeStatusDraft(contact,topics,contact.conversation_state==="active")});
     } else if(choice.decision==="remember"&&topics.length){
@@ -441,7 +454,7 @@ async function claimActions(request, env) {
     const templateConfigured=Boolean(env.WHATSAPP_TEMPLATE_NAME&&env.WHATSAPP_TEMPLATE_LANGUAGE);
     const windowStart=new Date(Date.now()-24*60*60*1000).toISOString();
     const drafts=await env.DB.prepare(
-      "SELECT d.id,d.contact_id,d.body,c.phone,c.last_interaction_at FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND c.conversation_state<>'active' AND (c.last_interaction_at>=? OR ?=1) AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id) ORDER BY d.created_at ASC LIMIT ?"
+      "SELECT d.id,d.contact_id,d.body,c.phone,c.last_interaction_at FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND (c.conversation_state<>'active' OR d.source_type='conversation') AND (c.last_interaction_at>=? OR ?=1) AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id) ORDER BY d.created_at ASC LIMIT ?"
     ).bind(windowStart,templateConfigured?1:0,Math.min(limit,capacity)).all();
     for(const draft of drafts.results||[]){
       const key="draft:"+draft.id;
@@ -491,14 +504,14 @@ async function authorizeAction(env,id) {
   const settings=await env.DB.prepare("SELECT paused FROM wa_settings WHERE id=1").first();
   if(!settings||settings.paused) return {authorized:false,reason:"emergency_pause",retryable:true};
   const action=await env.DB.prepare(
-    "SELECT q.status,q.send_mode,q.payload_json,c.consent_status,c.conversation_state,c.last_interaction_at FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?"
+    "SELECT q.status,q.send_mode,q.payload_json,d.source_type,c.consent_status,c.conversation_state,c.last_interaction_at FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id JOIN wa_message_drafts d ON d.id=q.draft_id WHERE q.id=?"
   ).bind(id).first();
   if(!action) return {authorized:false,reason:"action_not_found",retryable:false};
   if(action.status!=="processing") return {authorized:false,reason:"action_not_processing",retryable:false};
   if(action.consent_status!=="opted_in") return {authorized:false,reason:"consent_required",retryable:false};
-  if(action.conversation_state==="active") return {authorized:false,reason:"conversation_active",retryable:false};
   const lastInteraction=Date.parse(action.last_interaction_at||"");
   const withinServiceWindow=Number.isFinite(lastInteraction)&&lastInteraction<=Date.now()&&Date.now()-lastInteraction<=24*60*60*1000;
+  if(action.conversation_state==="active"&&!withinServiceWindow) return {authorized:false,reason:"conversation_active",retryable:false};
   if(!withinServiceWindow&&action.send_mode!=="template") return {authorized:false,reason:"template_required",retryable:false};
   const payload=parseJsonSafe(action.payload_json,{});
   if(action.send_mode==="template"&&(!payload.template_name||!payload.template_language)) return {authorized:false,reason:"template_not_configured",retryable:false};
@@ -507,7 +520,7 @@ async function authorizeAction(env,id) {
 
 async function recordActionResult(request, env, id) {
   const body=await readJson(request,32*1024);
-  const action=await env.DB.prepare("SELECT q.*,d.contact_id AS draft_contact_id,c.consent_status FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?").bind(id).first();
+  const action=await env.DB.prepare("SELECT q.*,d.contact_id AS draft_contact_id,d.source_type,c.consent_status FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?").bind(id).first();
   if(!action) return json({error:"Action introuvable."},404);
   if(["sent","cancelled","failed"].includes(action.status)) return json({ok:true,status:action.status,id:Number(id)});
   const now=isoNow();
@@ -543,7 +556,12 @@ async function recordActionResult(request, env, id) {
       env.DB.prepare("INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) VALUES(?,?, 'sent',?,?)").bind(id,action.contact_id,JSON.stringify({provider_message_id:body.provider_message_id||null}),now)
     ]);
     const contact=await env.DB.prepare("SELECT id FROM wa_contacts WHERE id=? AND consent_status='opted_in'").bind(action.contact_id).first();
-    if(contact) await recordContact({json:async()=>({action:"sent"})},env,action.contact_id);
+    if(contact&&["conversation","status"].includes(action.source_type)){
+      await env.DB.prepare("UPDATE wa_contacts SET last_contacted_at=?,last_interaction_at=?,conversation_state='active',updated_at=? WHERE id=?")
+        .bind(now,now,now,action.contact_id).run();
+    } else if(contact) {
+      await recordContact({json:async()=>({action:"sent"})},env,action.contact_id);
+    }
     return json({ok:true,id:Number(id),status:"sent"});
   }
 
