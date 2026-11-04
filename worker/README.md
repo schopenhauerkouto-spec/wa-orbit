@@ -33,7 +33,7 @@ Toutes les routes `/api/*` exigent `Authorization: Bearer <ADMIN_API_TOKEN>`.
 Un contact envoyé aujourd'hui est marqué comme contacté et reçoit une date `cooldown_until` à J+30. Il ne revient pas dans les sélections avant cette date. Les doublons du jour sont bloqués par clé primaire. Les contacts en conversation active sont écartés des nouvelles prises de contact. Les réponses entrantes du webhook actualisent l'interaction et placent la conversation en état actif.
 
 ## Important — limites d'envoi
-Cette étape fournit le moteur de contacts, de sélection et de suivi. Elle ne déclenche pas d'envoi WhatsApp automatique. L'envoi doit être raccordé à l'API officielle Meta, avec les règles de consentement, modèles approuvés hors fenêtre de service et fenêtre de 24 heures. Aucun mécanisme de contournement anti-spam n'est intégré. Le système reste en pause au démarrage.
+Le Worker ne transmet pas lui-même les messages : il expose une file d'actions que le processus `connector/runner.js` consomme avec Meta Cloud API. Chaque action est validée par l'utilisateur puis recontrôlée côté serveur juste avant le transport. Le système reste en pause au démarrage. L'intégration doit respecter les règles Meta applicables : consentement, modèles approuvés lorsque requis hors fenêtre de service de 24 heures, opt-out et qualité du compte. Aucun mécanisme de contournement anti-spam n'est intégré.
 
 ## Déploiement
 1. Créer/choisir la base D1 `wa-orbit-db`.
@@ -124,10 +124,21 @@ et non `status → réponse automatique systématique`.
 
 La validation d'un brouillon ne déclenche pas directement un envoi. Le Worker crée d'abord une action idempotente dans `wa_action_queue`.
 
-- `POST /api/actions/claim` : réserve jusqu'à 5 actions validées après recontrôle pause, consentement et quota.
-- `POST /api/actions/:id/result` : enregistre `sent` ou `failed`, le provider message id et l'audit.
+- `POST /api/actions/claim` : réserve jusqu'à 5 actions et leur attribue un bail `processing`.
+- `POST /api/actions/:id/authorize` : revalide pause, consentement et état de conversation immédiatement avant le transport.
+- `POST /api/actions/:id/result` : enregistre `sent`, `failed`, `cancelled` ou `deferred`, le provider message id et l'audit.
 - `GET /api/actions` : expose la file pour supervision.
+- Les callbacks Meta mettent à jour les reçus `sent`, `delivered`, `read` et `failed`.
 - Une clé `draft:<id>` empêche qu'un même brouillon soit réservé deux fois.
 - Les erreurs sont retentables jusqu'à 5 tentatives ; le transport réel reste séparé du Worker.
 
 Le connecteur ne doit jamais considérer une liste de brouillons comme une autorisation permanente : il revalide la sécurité juste avant le transport.
+
+
+## Réception, mémoire et fiabilité
+
+Les événements Meta sont vérifiés avec la signature HMAC SHA-256. Les messages entrants sont dédupliqués par identifiant fournisseur avant toute mise à jour de conversation ou création de brouillon : une nouvelle livraison du même webhook ne crée donc pas de deuxième brouillon. Pour les contacts autorisés, les thèmes détectés alimentent la mémoire de conversation et la mémoire relationnelle.
+
+Les accusés Meta sont stockés dans `webhook_statuses` et rapprochés de `wa_action_queue.provider_message_id`. Les baux d'action abandonnés sont récupérés après 10 minutes ; les tentatives sont limitées à cinq avec temporisation exponentielle. Les erreurs définitives sont conservées dans la file et l'audit pour inspection.
+
+La livraison côté connecteur est de type « au moins une fois » en cas de crash incertain après acceptation par le fournisseur. L'identifiant de brouillon rend la réservation interne idempotente, mais ne peut pas imposer une garantie exactly-once à un système externe.
