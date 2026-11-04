@@ -37,7 +37,7 @@ Le répertoire `worker/` contient désormais un backend D1 distinct du serveur h
 - rapprochement des reçus Meta `sent`, `delivered`, `read` et `failed` ;
 - contrôle de la fenêtre de service de 24 h et routage vers modèle approuvé hors fenêtre.
 
-Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et devra être déployé comme processus Node.js persistant sur une VM compatible (le candidat gratuit étudié est Google Cloud e2-micro, sous réserve de quotas et de facturation). Les secrets restent côté serveur. Le connecteur ne prend pas en charge Baileys ni un client non officiel pour un compte personnel.
+Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et devra être déployé comme processus Node.js persistant sur une VM compatible (le candidat gratuit étudié est Google Cloud e2-micro, sous réserve de quotas et de facturation). Les secrets restent côté serveur. Le transport Meta Cloud reste officiel. Un connecteur Baileys séparé est maintenant disponible pour une session WhatsApp Web/personnelle et la modération de groupes, avec des garde-fous explicites et sans mécanisme de contournement anti-abus. Voir `connector/BAILEYS.md`.
 
 **La migration du tableau de bord n'est pas terminée :** le frontend actuel appelle encore les routes de session de l'application Express (`/api/config`, `/api/events`, etc.). Il n'est donc pas encore raccordé à toutes les routes admin du Worker. La voie Express reste l'application web historique ; la voie Cloudflare/D1 est un backend distinct en cours d'intégration.
 
@@ -49,7 +49,7 @@ Consulte [worker/README.md](worker/README.md) et [connector/README.md](connector
 
 Le tableau de bord comprend un panneau de configuration des règles de groupe : détection des liens, listes de domaines autorisés/interdits, anti-flood, répétitions, exemptions d'administrateurs et seuil d'avertissement. Le moteur de règles est isolé du transport et dispose de tests unitaires.
 
-**État actuel : simulation uniquement.** Aucun connecteur de groupes WhatsApp n'est branché, aucune action ne supprime un message ou ne sanctionne un membre. Les capacités de groupe varient selon le type de compte et l'API disponible ; la Groups API officielle n'est pas un accès universel aux groupes personnels existants. Voir [docs/groups-and-moderation.md](docs/groups-and-moderation.md).
+**État actuel : moteur + connecteur Baileys disponibles.** Le connecteur reste désactivé par défaut et l'enforcement live nécessite explicitement `BAILEYS_GROUP_ENFORCEMENT=true`, une politique `enabled=true/mode=enforce`, un bot administrateur et une sécurité globale non pausée. Les capacités réelles dépendent du compte et de WhatsApp. Voir [docs/groups-and-moderation.md](docs/groups-and-moderation.md).
 
 ## Hébergement persistant sans Oracle
 
