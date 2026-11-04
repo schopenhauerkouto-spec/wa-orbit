@@ -253,7 +253,6 @@ async function recordContact(request, env, id) {
     const days = Math.min(365, Math.max(1, Number(settings?.cooldown_days) || 30));
     const now = new Date();
     const cooldown = new Date(now.getTime() + days * 86400000).toISOString();
-    const date = dayKey(now);
     await env.DB.batch([
       env.DB.prepare("UPDATE wa_contacts SET last_contacted_at=?, cooldown_until=?, conversation_state='waiting', updated_at=? WHERE id=?")
         .bind(now.toISOString(), cooldown, now.toISOString(), id),
