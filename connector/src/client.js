@@ -29,6 +29,10 @@ export class OrbitClient {
     });
   }
 
+  authorizeAction(id) {
+    return this.request(`/api/actions/${id}/authorize`, { method: "POST", body: "{}" });
+  }
+
   actionResult(id, payload) {
     return this.request(`/api/actions/${id}/result`, {
       method: "POST",
