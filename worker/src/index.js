@@ -268,6 +268,14 @@ async function handleApi(request, env, url) {
   if (!authorized(request, env)) return json({ error: "Authentification requise." }, 401);
   if (request.method === "GET" && url.pathname === "/api/personality") return getPersonality(env);
   if (request.method === "GET" && url.pathname === "/api/drafts") return listDrafts(env,url);
+  if (request.method === "GET" && url.pathname === "/api/interaction-policy") return json(await getInteractionPolicy(env));
+  if (request.method === "POST" && url.pathname === "/api/interaction-policy") {
+    const b=await readJson(request), p=await getInteractionPolicy(env);
+    const n=(v,d,min,max)=>Math.min(max,Math.max(min,Number(v ?? d)||d));
+    await env.DB.prepare("UPDATE wa_interaction_policy SET status_reply_threshold=?,status_reaction_threshold=?,status_remember_threshold=?,max_status_interactions_per_contact_7d=?,min_hours_between_status_interactions=?,social_energy_daily=?,updated_at=? WHERE id=1")
+      .bind(n(b.status_reply_threshold,p.status_reply_threshold,0,100),n(b.status_reaction_threshold,p.status_reaction_threshold,0,100),n(b.status_remember_threshold,p.status_remember_threshold,0,100),n(b.max_status_interactions_per_contact_7d,p.max_status_interactions_per_contact_7d,0,50),n(b.min_hours_between_status_interactions,p.min_hours_between_status_interactions,1,720),n(b.social_energy_daily,p.social_energy_daily,0,50),isoNow()).run();
+    return json(await getInteractionPolicy(env));
+  }
   if (request.method === "POST" && url.pathname === "/api/status-events") return ingestStatus(request,env);
   const draftMatch=url.pathname.match(/^\/api\/drafts\/(\\d+)$/);
   if (draftMatch && request.method === "POST") return updateDraft(request,env,Number(draftMatch[1]));
@@ -285,6 +293,9 @@ async function handleApi(request, env, url) {
   if (request.method === "GET" && url.pathname === "/api/contacts") return listContacts(env, url);
   if (request.method === "POST" && url.pathname === "/api/contacts/import") return importContacts(request, env);
   if (request.method === "GET" && url.pathname === "/api/contacts/daily-selection") return selectDailyContacts(env, url);
+  const interestMatch=url.pathname.match(/^\/api\/contacts\/([0-9a-f-]{36})\/interests$/i);
+  if(interestMatch&&request.method==="GET"){ const p=await ensureInterestProfile(env,interestMatch[1]); return json(p||{}); }
+  if(interestMatch&&request.method==="POST"){ const b=await readJson(request,32*1024); await ensureInterestProfile(env,interestMatch[1]); const topics=b.topics&&typeof b.topics==="object"?b.topics:{}; await env.DB.prepare("UPDATE wa_interest_profiles SET topics_json=?,curiosity_threshold=?,status_interaction_cooldown_hours=?,max_status_interactions_7d=?,updated_at=? WHERE contact_id=?").bind(JSON.stringify(topics),Math.min(100,Math.max(0,Number(b.curiosity_threshold)||55)),Math.min(720,Math.max(1,Number(b.status_interaction_cooldown_hours)||24)),Math.min(50,Math.max(0,Number(b.max_status_interactions_7d)||3)),isoNow(),interestMatch[1]).run(); return json(await ensureInterestProfile(env,interestMatch[1])); }
   const profileMatch = url.pathname.match(/^\/api\/contacts\/([0-9a-f-]{36})\/profile$/i);
   if (profileMatch && request.method === "GET") return getContactProfile(env, profileMatch[1]);
   if (profileMatch && request.method === "POST") return updateContactProfile(request, env, profileMatch[1]);
