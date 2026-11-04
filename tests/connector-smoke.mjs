@@ -3,6 +3,7 @@ import { canSend, normalizeEvent } from "../connector/src/policy.js";
 import { ActionQueue } from "../connector/src/queue.js";
 import { MetaCloudTransport } from "../connector/src/meta-cloud-transport.js";
 import { syncApproved } from "../connector/src/index.js";
+import { OrbitClient } from "../connector/src/client.js";
 
 assert.deepEqual(canSend({paused:true,consentStatus:"opted_in",approved:true,dailyCount:0,dailyLimit:5}),{ok:false,reason:"emergency_pause"});
 assert.deepEqual(canSend({paused:false,consentStatus:"unknown",approved:true,dailyCount:0,dailyLimit:5}),{ok:false,reason:"consent_required"});
@@ -94,3 +95,70 @@ assert.equal(pausedResult[0].reason,"emergency_pause");
 assert.equal(pausedTransportCalls,0);
 assert.ok(pausedCalls.some(call=>call.url.endsWith("/api/actions/45/result")));
 console.log("WA Orbit guarded sync tests : OK");
+
+const normalizedClient = new OrbitClient({
+  baseUrl: "https://orbit.example/",
+  token: "test",
+  fetchImpl: async () => new Response(JSON.stringify({ok:true}), {status:200})
+});
+assert.equal(normalizedClient.baseUrl, "https://orbit.example");
+
+let templatePayload;
+const templateTransport = new MetaCloudTransport({
+  accessToken:"template-token",
+  phoneNumberId:"123",
+  fetchImpl:async(url,options)=>{
+    templatePayload=JSON.parse(options.body);
+    return new Response(JSON.stringify({messages:[{id:"wamid.template"}]}),{status:200,headers:{"content-type":"application/json"}});
+  }
+});
+const templateSent=await templateTransport.sendTemplate({
+  phone:"+2250700000000",
+  name:"orbit_followup",
+  language:"fr",
+  body:"Petit message personnalisé"
+});
+assert.equal(templateSent.id,"wamid.template");
+assert.equal(templatePayload.type,"template");
+assert.equal(templatePayload.template.name,"orbit_followup");
+assert.equal(templatePayload.template.language.code,"fr");
+assert.equal(templatePayload.template.components[0].parameters[0].text,"Petit message personnalisé");
+
+const templateApiCalls=[];
+const templateApiFetch=async(url,options={})=>{
+  templateApiCalls.push({url,options});
+  if(url.endsWith("/api/actions/claim")) return new Response(JSON.stringify({
+    actions:[{
+      id:46,
+      send_mode:"template",
+      payload_json:JSON.stringify({
+        phone:"+2250700000000",
+        body:"Texte de suivi",
+        mode:"template",
+        template_name:"orbit_followup",
+        template_language:"fr",
+        template_body_parameter:true
+      })
+    }]
+  }),{status:200,headers:{"content-type":"application/json"}});
+  if(url.endsWith("/api/actions/46/authorize")) return new Response(JSON.stringify({authorized:true}),{status:200,headers:{"content-type":"application/json"}});
+  if(url.endsWith("/api/actions/46/result")) return new Response(JSON.stringify({ok:true,status:"sent"}),{status:200,headers:{"content-type":"application/json"}});
+  throw new Error("Unexpected template API URL: "+url);
+};
+let templateTransportCalls=0;
+const templateSync=await syncApproved({
+  baseUrl:"https://orbit.example",token:"test-token",fetchImpl:templateApiFetch,minDelayMs:0,batchSize:1
+},{
+  send:async()=>{throw new Error("free-form text must not be used");},
+  sendTemplate:async({phone,name,language,body})=>{
+    templateTransportCalls++;
+    assert.equal(phone,"+2250700000000");
+    assert.equal(name,"orbit_followup");
+    assert.equal(language,"fr");
+    assert.equal(body,"Texte de suivi");
+    return {id:"wamid.template-sync"};
+  }
+});
+assert.equal(templateSync[0].status,"sent");
+assert.equal(templateTransportCalls,1);
+console.log("WA Orbit approved-template tests : OK");
