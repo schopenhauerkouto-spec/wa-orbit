@@ -94,7 +94,19 @@ export async function syncApproved(config, transportOverride) {
 
     let providerResponse;
     try {
-      providerResponse = await transport.send({phone, body});
+      const sendMode = payload.mode || action.send_mode || "text";
+      if (sendMode === "template") {
+        if (typeof transport.sendTemplate !== "function") throw new Error("WHATSAPP_TEMPLATE_TRANSPORT_REQUIRED");
+        providerResponse = await transport.sendTemplate({
+          phone,
+          name: payload.template_name,
+          language: payload.template_language,
+          body: payload.template_body_parameter === false ? undefined : body,
+          components: payload.template_components
+        });
+      } else {
+        providerResponse = await transport.send({phone, body});
+      }
     } catch (error) {
       const message = String(error?.message || error).slice(0, 500);
       await connector.orbit.actionResult(action.id, {status: "failed", error: message});
