@@ -445,6 +445,7 @@ function updateMessageMode() {
   const isText = messageMode() === 'text';
   $('#textModeFields').classList.toggle('hidden', !isText);
   $('#templateModeFields').classList.toggle('hidden', isText);
+  $('#copyMessageBtn').classList.toggle('hidden', !isText);
   updateRecipientHint();
 }
 
@@ -480,8 +481,33 @@ async function handleMessageSubmit(event) {
     feedback.textContent = error.message;
   } finally {
     submit.disabled = false;
-    submit.innerHTML = 'Envoyer via WhatsApp <span>↗</span>';
+    submit.innerHTML = 'Envoyer via WhatsApp Business <span>↗</span>';
     updateRecipientHint();
+  }
+}
+
+async function copyMessageToClipboard() {
+  const contact = selectedContact();
+  const message = $('#messageText').value.trim();
+  const feedback = $('#sendFeedback');
+  feedback.textContent = '';
+  if (!contact) { feedback.textContent = 'Sélectionne un contact.'; return; }
+  if (contact.blocked || contact.stage === 'opt-out') {
+    feedback.textContent = 'Copie bloquée : ce contact a demandé l’arrêt.';
+    return;
+  }
+  if (!contact.optedIn && !within24h(contact.lastInboundAt)) {
+    feedback.textContent = 'Pas de consentement enregistré ni de message entrant récent : ne prépare pas une sollicitation non demandée.';
+    return;
+  }
+  if (!message) { feedback.textContent = 'Écris ou génère un brouillon avant de le copier.'; return; }
+  try {
+    await navigator.clipboard.writeText(message);
+    feedback.style.color = '#2b9669';
+    feedback.textContent = 'Texte copié. Ouvre WhatsApp et envoie-le manuellement après ta dernière vérification.';
+  } catch {
+    feedback.style.color = '#c06c59';
+    feedback.textContent = 'Copie indisponible dans ce navigateur. Sélectionne le texte et copie-le manuellement.';
   }
 }
 
@@ -596,6 +622,7 @@ function bindEvents() {
   });
   $$('input[name="messageMode"]').forEach(input => input.addEventListener('change', updateMessageMode));
   $('#messageForm').addEventListener('submit', handleMessageSubmit);
+  $('#copyMessageBtn').addEventListener('click', copyMessageToClipboard);
   $('#messageText').addEventListener('input', () => $('#charCount').textContent = `${$('#messageText').value.length} / 4096`);
   $('#generateDraftBtn').addEventListener('click', generateDraft);
   $('#refreshEventsBtn').addEventListener('click', refreshAll);
