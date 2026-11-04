@@ -131,15 +131,20 @@ async function selectDailyContacts(env, url) {
   if (!remaining) return json({ date: today, paused: false, contacts: [], remaining: 0, message: "Quota quotidien déjà atteint." });
 
   const candidates = await env.DB.prepare(`
-    SELECT c.id, c.phone, c.display_name, c.last_contacted_at, c.cooldown_until
+    SELECT c.id, c.phone, c.display_name, c.last_contacted_at, c.cooldown_until,
+           COALESCE(p.relationship_type, 'friend') AS relationship_type,
+           COALESCE(p.preferred_tone, 'natural') AS preferred_tone,
+           COALESCE(p.priority, 3) AS priority,
+           p.follow_up_due_at
     FROM wa_contacts c
+    LEFT JOIN wa_contact_profiles p ON p.contact_id = c.id
     WHERE c.consent_status = 'opted_in'
       AND c.conversation_state <> 'active'
       AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?)
       AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id = c.id AND d.selection_date = ?)
-    ORDER BY COALESCE(c.last_contacted_at, '1970-01-01') ASC, c.created_at ASC
+    ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at <= ? THEN 0 ELSE 1 END ASC, COALESCE(p.priority, 3) DESC, COALESCE(c.last_contacted_at, '1970-01-01') ASC, c.created_at ASC
     LIMIT ?
-  `).bind(isoNow(), today, remaining).all();
+  `).bind(isoNow(), isoNow(), today, remaining).all();
   const rows = candidates.results || [];
   if (rows.length) await env.DB.batch(rows.map(contact => env.DB.prepare(
     "INSERT OR IGNORE INTO wa_daily_selections (selection_date, contact_id, state, selected_at) VALUES (?, ?, 'selected', ?)"
@@ -194,9 +199,51 @@ async function recordContact(request, env, id) {
   return json({ error: "Action inconnue. Actions: opt_in, opt_out, sent, conversation_active, conversation_closed." }, 400);
 }
 
+async function getPersonality(env) {
+  const row = await env.DB.prepare("SELECT id, name, role, tone, mission, values_json, style_rules_json, updated_at FROM wa_personality WHERE id=1").first();
+  if (!row) return json({ error: "Personnalité non configurée." }, 404);
+  return json({ ...row, values: JSON.parse(row.values_json || "[]"), style_rules: JSON.parse(row.style_rules_json || "[]") });
+}
+
+async function updatePersonality(request, env) {
+  const body = await readJson(request, 32 * 1024);
+  const values = Array.isArray(body.values) ? body.values.slice(0, 12).map(v => text(v, 80)) : ["patience","paix","bienveillance","enthousiasme","curiosité","respect"];
+  const rules = Array.isArray(body.style_rules) ? body.style_rules.slice(0, 20).map(v => text(v, 160)) : ["écouter avant de répondre","éviter la pression","adapter le ton au contact","privilégier les messages courts et naturels","ne pas inventer de contexte"];
+  const now = isoNow();
+  await env.DB.prepare("UPDATE wa_personality SET name=?, role=?, tone=?, mission=?, values_json=?, style_rules_json=?, updated_at=? WHERE id=1").bind(
+    text(body.name || "WA Orbit", 80),
+    text(body.role || "Motivateur personnel enthousiaste et ingénieux", 160),
+    text(body.tone || "chaleureux, calme, positif, naturel", 240),
+    text(body.mission || "Entretenir des relations humaines de manière utile, respectueuse et personnalisée", 400),
+    JSON.stringify(values), JSON.stringify(rules), now
+  ).run();
+  return getPersonality(env);
+}
+
+async function getContactProfile(env, id) {
+  const row = await env.DB.prepare("SELECT c.id, c.phone, c.display_name, c.consent_status, c.conversation_state, p.relationship_type, p.preferred_tone, p.priority, p.notes, p.topics_json, p.follow_up_after_days, p.follow_up_due_at, p.updated_at FROM wa_contacts c LEFT JOIN wa_contact_profiles p ON p.contact_id = c.id WHERE c.id=?").bind(id).first();
+  if (!row) return json({ error: "Contact introuvable." }, 404);
+  return json({ ...row, topics: JSON.parse(row.topics_json || "[]") });
+}
+
+async function updateContactProfile(request, env, id) {
+  const contact = await env.DB.prepare("SELECT id FROM wa_contacts WHERE id=?").bind(id).first();
+  if (!contact) return json({ error: "Contact introuvable." }, 404);
+  const body = await readJson(request, 32 * 1024);
+  const topics = Array.isArray(body.topics) ? body.topics.slice(0, 20).map(v => text(v, 100)) : [];
+  const now = isoNow();
+  await env.DB.prepare("INSERT INTO wa_contact_profiles (contact_id, relationship_type, preferred_tone, priority, notes, topics_json, follow_up_after_days, follow_up_due_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(contact_id) DO UPDATE SET relationship_type=excluded.relationship_type, preferred_tone=excluded.preferred_tone, priority=excluded.priority, notes=excluded.notes, topics_json=excluded.topics_json, follow_up_after_days=excluded.follow_up_after_days, follow_up_due_at=excluded.follow_up_due_at, updated_at=excluded.updated_at").bind(
+    id, text(body.relationship_type || "friend", 50), text(body.preferred_tone || "natural", 50),
+    Math.min(5, Math.max(1, Number(body.priority) || 3)), text(body.notes || "", 1000), JSON.stringify(topics),
+    Math.min(365, Math.max(1, Number(body.follow_up_after_days) || 30)), body.follow_up_due_at ? text(body.follow_up_due_at, 40) : null, now
+  ).run();
+  return getContactProfile(env, id);
+}
 async function handleApi(request, env, url) {
   if (!env.DB) return json({ error: "Base D1 non configurée." }, 503);
   if (!authorized(request, env)) return json({ error: "Authentification requise." }, 401);
+  if (request.method === "GET" && url.pathname === "/api/personality") return getPersonality(env);
+  if (request.method === "POST" && url.pathname === "/api/personality") return updatePersonality(request, env);
   if (request.method === "GET" && url.pathname === "/api/safety") {
     const row = await env.DB.prepare("SELECT paused, daily_limit, cooldown_days FROM wa_settings WHERE id=1").first();
     return json(row || { paused: true, daily_limit: 5, cooldown_days: 30 });
@@ -210,6 +257,9 @@ async function handleApi(request, env, url) {
   if (request.method === "GET" && url.pathname === "/api/contacts") return listContacts(env, url);
   if (request.method === "POST" && url.pathname === "/api/contacts/import") return importContacts(request, env);
   if (request.method === "GET" && url.pathname === "/api/contacts/daily-selection") return selectDailyContacts(env, url);
+  const profileMatch = url.pathname.match(/^\/api\/contacts\/([0-9a-f-]{36})\/profile$/i);
+  if (profileMatch && request.method === "GET") return getContactProfile(env, profileMatch[1]);
+  if (profileMatch && request.method === "POST") return updateContactProfile(request, env, profileMatch[1]);
   const match = url.pathname.match(/^\/api\/contacts\/([0-9a-f-]{36})\/action$/i);
   if (request.method === "POST" && match) return recordContact(request, env, match[1]);
   return json({ error: "Route API introuvable." }, 404);
