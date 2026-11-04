@@ -4,6 +4,8 @@ import { ActionQueue } from "../connector/src/queue.js";
 import { MetaCloudTransport } from "../connector/src/meta-cloud-transport.js";
 import { syncApproved } from "../connector/src/index.js";
 import { OrbitClient } from "../connector/src/client.js";
+import { BaileysTransport } from "../connector/src/baileys-transport.js";
+import { EventEmitter } from "node:events";
 
 assert.deepEqual(canSend({paused:true,consentStatus:"opted_in",approved:true,dailyCount:0,dailyLimit:5}),{ok:false,reason:"emergency_pause"});
 assert.deepEqual(canSend({paused:false,consentStatus:"unknown",approved:true,dailyCount:0,dailyLimit:5}),{ok:false,reason:"consent_required"});
@@ -162,3 +164,39 @@ const templateSync=await syncApproved({
 assert.equal(templateSync[0].status,"sent");
 assert.equal(templateTransportCalls,1);
 console.log("WA Orbit approved-template tests : OK");
+
+const events = new EventEmitter();
+const inbound = [];
+const receipts = [];
+const socket = {
+  ev: events,
+  async sendMessage(jid, payload) {
+    assert.equal(jid, "2250700000000@s.whatsapp.net");
+    assert.equal(payload.text, "Salut Baileys");
+    return { key: { id: "BAILEYS-1" } };
+  },
+  end() {}
+};
+const baileys = new BaileysTransport({
+  authDir: "test-auth",
+  authStateFactory: async () => ({ state: { creds: { registered: true } }, saveCreds: async () => {} }),
+  socketFactory: () => socket,
+  onMessage: value => inbound.push(value),
+  onReceipt: value => receipts.push(value)
+});
+await baileys.connect();
+const baileysSent = await baileys.send({phone:"+2250700000000",body:"Salut Baileys"});
+assert.equal(baileysSent.id,"BAILEYS-1");
+events.emit("messages.upsert", {messages:[{
+  key:{id:"INBOUND-1",remoteJid:"2250700000011@s.whatsapp.net",fromMe:false},
+  pushName:"Koffi",
+  message:{conversation:"Salut Orbit"}
+}]});
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(inbound[0].phone,"2250700000011");
+assert.equal(inbound[0].text,"Salut Orbit");
+events.emit("messages.update", [{key:{id:"BAILEYS-1",remoteJid:"2250700000000@s.whatsapp.net"},update:{status:4}}]);
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(receipts[0].status,"read");
+await baileys.stop();
+console.log("WA Orbit Baileys transport smoke tests : OK");
