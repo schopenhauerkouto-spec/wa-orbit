@@ -340,6 +340,7 @@ function renderGroupModeration() {
   $('#groupRepeatWindow').value = p.repeats?.windowSeconds ?? 120;
   $('#groupWarningsEnabled').checked = p.warnings?.enabled !== false;
   $('#groupWarningThreshold').value = p.warnings?.threshold ?? 3;
+
   const connector = data.connector || {};
   $('#groupTransportState').textContent = connector.connected
     ? (connector.liveEnforcement
@@ -349,6 +350,45 @@ function renderGroupModeration() {
   $('#groupPolicyFeedback').textContent = p.enabled
     ? (connector.connected ? 'Moteur actif : vérifie le mode et les droits du bot avant toute enforcement.' : 'Moteur activé, mais aucun connecteur réel n’est connecté.')
     : 'Moteur désactivé au démarrage.';
+
+  const setup = data.setup || {};
+  const mode = setup.mode === 'pairing' ? 'pairing' : 'qr';
+  $$('input[name="baileysSetupMode"]').forEach(input => { input.checked = input.value === mode; });
+  $('#baileysPairingNumber').value = setup.pairingNumber || '';
+
+  const badge = $('#baileysSetupState');
+  const status = setup.status || 'idle';
+  badge.textContent = connector.connected ? 'Connecté' :
+    status === 'pairing_code' ? 'Code prêt' :
+    status === 'qr' ? 'QR prêt' :
+    status === 'logged_out' ? 'À reconnecter' :
+    status === 'resetting' || status === 'reset_requested' ? 'Réinitialisation' : 'En attente';
+  badge.className = 'setup-badge ' + (connector.connected ? 'online' : (status === 'qr' || status === 'pairing_code' ? 'waiting' : ''));
+
+  const qrWrap = $('#baileysQrWrap');
+  const codeWrap = $('#baileysPairCodeWrap');
+  const help = $('#baileysSetupHelp');
+  if (setup.qrDataUrl && !connector.connected && mode === 'qr') {
+    qrWrap.innerHTML = '<img src="' + escapeHtml(setup.qrDataUrl) + '" alt="QR de connexion WhatsApp">';
+    qrWrap.classList.remove('hidden');
+    codeWrap.classList.add('hidden');
+    help.textContent = 'Sur WhatsApp : Appareils liés → Lier un appareil → scanne le QR.';
+  } else if (setup.pairingCode && !connector.connected && mode === 'pairing') {
+    qrWrap.innerHTML = '<div class="baileys-qr-placeholder">Mode numéro actif.</div>';
+    codeWrap.classList.remove('hidden');
+    $('#baileysPairCode').textContent = setup.pairingCode;
+    help.textContent = 'Sur WhatsApp : Appareils liés → Lier avec un numéro, puis saisis ce code.';
+  } else if (connector.connected) {
+    qrWrap.innerHTML = '<div class="baileys-qr-placeholder">✅ WhatsApp est connecté.<br>La session est conservée sur le serveur.</div>';
+    codeWrap.classList.add('hidden');
+    help.textContent = 'Tu n’as plus besoin de QR ou de code. La session se reconnectera automatiquement.';
+  } else {
+    qrWrap.innerHTML = '<div class="baileys-qr-placeholder">QR en attente…<br>Le connecteur doit être démarré pour générer la connexion.</div>';
+    codeWrap.classList.add('hidden');
+    help.textContent = setup.lastError
+      ? 'Erreur : ' + setup.lastError
+      : 'Enregistre ton mode puis lance le connecteur Baileys sur le serveur.';
+  }
 }
 
 function groupPolicyPayload() {
