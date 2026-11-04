@@ -138,23 +138,26 @@ async function handleWebhook(request, env) {
         const errors = Array.isArray(status.errors) ? status.errors : [];
         const errorText = errors.length ? text(errors.map(e => e.title || e.message || e.code).join("; "), 500) : "";
 
-        await env.DB.prepare(
-          "INSERT INTO webhook_statuses (message_id, recipient_id, status, updated_at, status_timestamp, errors_json) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET recipient_id=excluded.recipient_id, status=excluded.status, updated_at=excluded.updated_at, status_timestamp=excluded.status_timestamp, errors_json=excluded.errors_json"
-        ).bind(text(status.id, 200), text(status.recipient_id, 40), providerStatus, isoNow(), statusAt, JSON.stringify(errors)).run();
+        const statusRank = ({sent:1, delivered:2, read:3, failed:4})[providerStatus] || 0;
+        const statusWrite = await env.DB.prepare(
+          "INSERT INTO webhook_statuses (message_id, recipient_id, status, updated_at, status_timestamp, errors_json, status_rank) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET recipient_id=excluded.recipient_id, status=CASE WHEN webhook_statuses.status='failed' THEN 'failed' WHEN excluded.status_rank > webhook_statuses.status_rank THEN excluded.status WHEN excluded.status_rank=webhook_statuses.status_rank THEN excluded.status ELSE webhook_statuses.status END, updated_at=excluded.updated_at, status_timestamp=CASE WHEN excluded.status_rank >= webhook_statuses.status_rank THEN excluded.status_timestamp ELSE webhook_statuses.status_timestamp END, errors_json=CASE WHEN excluded.status='failed' THEN excluded.errors_json ELSE webhook_statuses.errors_json END, status_rank=MAX(webhook_statuses.status_rank, excluded.status_rank) WHERE excluded.status_rank > webhook_statuses.status_rank OR (excluded.status_rank=webhook_statuses.status_rank AND excluded.status_timestamp > COALESCE(webhook_statuses.status_timestamp,''))"
+        ).bind(text(status.id, 200), text(status.recipient_id, 40), providerStatus, isoNow(), statusAt, JSON.stringify(errors), statusRank).run();
 
-        const action = await env.DB.prepare(
-          "SELECT id, contact_id FROM wa_action_queue WHERE provider_message_id=?"
-        ).bind(text(status.id, 200)).first();
-        if (action) {
-          await env.DB.prepare(
-            "UPDATE wa_action_queue SET provider_status=?, provider_status_at=?, provider_error_json=?, status=CASE WHEN ?='failed' THEN 'failed' ELSE status END, error=CASE WHEN ?='failed' THEN ? ELSE error END, updated_at=? WHERE id=?"
-          ).bind(providerStatus, statusAt, JSON.stringify(errors), providerStatus, providerStatus, errorText || "Meta delivery failed", isoNow(), action.id).run();
-          await env.DB.prepare(
-            "INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) VALUES(?,?,?,?,?)"
-          ).bind(action.id, action.contact_id, "provider_" + providerStatus,
-            JSON.stringify({ provider_message_id: status.id, errors }), isoNow()).run();
+        if (Number(statusWrite?.meta?.changes || 0) === 1) {
+          const action = await env.DB.prepare(
+            "SELECT id, contact_id FROM wa_action_queue WHERE provider_message_id=?"
+          ).bind(text(status.id, 200)).first();
+          if (action) {
+            await env.DB.prepare(
+              "UPDATE wa_action_queue SET provider_status=CASE WHEN provider_status='failed' THEN 'failed' WHEN ?>=provider_status_rank THEN ? ELSE provider_status END, provider_status_rank=MAX(provider_status_rank, ?), provider_status_at=CASE WHEN ?>=provider_status_rank THEN ? ELSE provider_status_at END, provider_error_json=CASE WHEN ?='failed' THEN ? ELSE provider_error_json END, status=CASE WHEN ?='failed' THEN 'failed' ELSE status END, error=CASE WHEN ?='failed' THEN ? ELSE error END, updated_at=? WHERE id=?"
+            ).bind(statusRank, providerStatus, statusRank, statusRank, statusAt, providerStatus, JSON.stringify(errors), providerStatus, providerStatus, errorText || "Meta delivery failed", isoNow(), action.id).run();
+            await env.DB.prepare(
+              "INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) VALUES(?,?,?,?,?)"
+            ).bind(action.id, action.contact_id, "provider_" + providerStatus,
+              JSON.stringify({provider_message_id:status.id, errors, status_timestamp:statusAt}), isoNow()).run();
+          }
+          updatedStatuses++;
         }
-        updatedStatuses++;
       }
     }
   }
