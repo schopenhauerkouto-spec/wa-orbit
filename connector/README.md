@@ -1,83 +1,60 @@
-# WA Orbit — connecteur WhatsApp Baileys
+# WA Orbit — connecteur WhatsApp officiel
 
-Le connector est le processus de transport séparé du cerveau Cloudflare Worker.
+Le connector est un processus de transport séparé du cerveau Cloudflare Worker. Il utilise exclusivement la **WhatsApp Business Platform officielle de Meta**.
 
 ## Architecture
 
-`WhatsApp personnel → Baileys → Connector → Cloudflare Worker → D1`
+`WhatsApp Business Platform → Meta Cloud API → Connector → Cloudflare Worker → D1`
 
-- **Baileys** = transport WhatsApp : connexion, session, réception, envoi et reçus.
-- **Worker/D1** = cerveau : contacts, consentement, mémoire, sélection quotidienne, brouillons, autorisation, quota, pause d'urgence.
-- **Le connector ne décide jamais seul d'envoyer** : chaque action est revalidée par le Worker juste avant le transport.
+- **Meta Cloud API** = transport officiel réservé à un numéro WhatsApp Business configuré.
+- **Worker/D1** = cerveau : contacts, consentement, mémoire relationnelle, brouillons, autorisation, quota et pause d'urgence.
+- **Dashboard** = validation humaine des brouillons avant qu'ils soient placés dans la file d'envoi.
 
-Baileys est une bibliothèque non officielle qui se connecte comme client WhatsApp Web. Elle ne nécessite donc pas Meta WhatsApp Cloud API pour envoyer les messages avec ce connecteur. Elle reste toutefois soumise aux conditions et contrôles de WhatsApp ; ce projet n'implémente aucun contournement anti-spam ou anti-détection.
+## Limite importante pour un compte personnel
 
-## Configuration
+Ce connector ne connecte pas un compte WhatsApp Messenger personnel. Baileys est un client non officiel ; WhatsApp interdit l'utilisation de clients non officiels et les messages automatisés ou en masse dans ses règles de messagerie. WA Orbit ne fournit donc ni QR de connexion personnel, ni scraping de statuts personnels, ni envoi automatique via Baileys.
+
+Pour un compte personnel, WA Orbit peut rester un **assistant de préparation** : tu ajoutes le contexte, l'IA rédige une proposition, tu la relis et tu la copies toi-même dans WhatsApp. Aucun message ne part du compte personnel depuis le serveur.
+
+## Configuration Meta officielle
 
 Variables :
 
-- `ORBIT_API_URL` : URL publique du Worker.
+- `ORBIT_API_URL` : URL publique du Cloudflare Worker.
 - `ADMIN_API_TOKEN` : même secret que le Worker.
-- `BAILEYS_PHONE_NUMBER` : numéro E.164 en chiffres uniquement pour le code de jumelage. Laisser vide pour utiliser le QR.
-- `BAILEYS_AUTH_DIR` : répertoire persistant de session.
+- `WHATSAPP_ACCESS_TOKEN` : jeton serveur Meta.
+- `WHATSAPP_PHONE_NUMBER_ID` : identifiant du numéro WhatsApp Business.
+- `WHATSAPP_API_VERSION` : version Graph API, défaut `v26.0`.
 - `ORBIT_BATCH_SIZE` : 1 à 5, défaut 5.
-- `ORBIT_MIN_DELAY_MS` : délai local entre deux transports, défaut 30000.
-- `ORBIT_POLL_INTERVAL_MS` : intervalle entre les cycles, défaut 60000.
+- `ORBIT_MIN_DELAY_MS` : intervalle local entre deux actions ; ce n'est pas un mécanisme de contournement des limites.
+- `ORBIT_POLL_INTERVAL_MS` : intervalle entre les cycles.
 
 Commande : `npm run connector:worker`
 
-### Render
+Déployer ce composant comme **Background Worker** distinct du service web. Les secrets restent côté serveur ; ne jamais les intégrer au frontend ou au dépôt.
 
-Déployer le connector comme **Background Worker** séparé. Si la plateforme utilise un disque éphémère, ne pas y laisser la session Baileys en production : la session doit être conservée sur un stockage persistant ou via un vrai store d'authentification adapté.
+## Règles d'envoi
 
-Le dossier d'authentification contient des secrets de session WhatsApp. Il ne doit jamais être commité, envoyé au frontend ou exposé dans les logs.
+1. Le contact doit avoir explicitement accepté les communications.
+2. Un brouillon doit être relu et approuvé dans WA Orbit.
+3. Le Worker revalide pause d'urgence, consentement et fenêtre de service juste avant le transport.
+4. Dans la fenêtre de service de 24 heures, les réponses libres sont possibles selon la politique WhatsApp Business.
+5. En dehors de cette fenêtre, l'envoi exige un modèle Meta approuvé adapté au motif du message.
+6. Un opt-out annule les actions encore en file et bloque les prochains envois.
+7. Le Worker réserve la capacité quotidienne et empêche la double réservation d'une même action.
 
-## Première connexion
+Ne pas utiliser ce système pour prospecter des personnes qui n'ont pas demandé à être contactées, importer des listes achetées, envoyer des messages automatiques à froid ou contourner les limites de WhatsApp.
 
-1. Lancer le connector.
-2. Si `BAILEYS_PHONE_NUMBER` est renseigné, le connector demande un code de jumelage lorsque Baileys le permet.
-3. Sinon, un QR est affiché dans le terminal.
-4. Associer le compte depuis WhatsApp.
-5. Les identifiants sont ensuite sauvegardés dans `BAILEYS_AUTH_DIR`.
+## Webhooks
 
-La documentation Baileys déconseille `useMultiFileAuthState` pour la production ; cette implémentation l'utilise pour amorcer le connector. Une prochaine étape de durcissement doit remplacer ce stockage fichier par un store d'authentification persistant chiffré/DB.
+Configurer l'URL `https://<worker>/webhook` dans Meta et abonner l'application aux événements WhatsApp nécessaires. Le Worker vérifie la signature `X-Hub-Signature-256`, déduplique les identifiants entrants et met à jour les accusés de livraison.
 
-## Événements
+## Fiabilité et limites
 
-Le connector transmet au Worker :
+- Les baux `processing` abandonnés sont récupérés après 10 minutes.
+- Les échecs sont retentés jusqu'à cinq fois avec un backoff exponentiel.
+- Les échecs définitifs sont conservés dans l'audit.
+- Les reçus `sent/delivered/read/failed` ne doivent pas régresser vers un état antérieur.
+- Aucun système distribué ne peut promettre un envoi externe « exactly once » si le processus tombe après acceptation par le fournisseur et avant la confirmation locale.
 
-- les messages entrants via `/api/connector/inbound` ;
-- les reçus `sent/delivered/read/failed` via `/api/connector/receipts`.
-
-Les deux routes utilisent le même `ADMIN_API_TOKEN` que les autres routes internes. Les messages entrants sont dédupliqués par leur identifiant Baileys.
-
-Les messages `messages.upsert` portant un `requestId` sont ignorés afin de réduire le risque lié aux événements d'historique/rejeu documenté par Baileys.
-
-## Contrat d'exécution
-
-1. Le Worker réserve les actions validées et crée un bail `processing`.
-2. Le connector revalide immédiatement pause, consentement et état de conversation.
-3. Une pause replace l'action en file sans consommer une tentative.
-4. Un consentement invalide ou une autorisation expirée annule l'action.
-5. Baileys transporte le message et retourne son identifiant.
-6. Les événements Baileys réconcilient les reçus.
-
-Le Worker récupère les baux `processing` abandonnés après 10 minutes. Les échecs sont retentés jusqu'à cinq fois avec backoff ; les échecs définitifs restent dans l'audit.
-
-## Statuts personnels
-
-Baileys peut fournir des événements liés à un compte WhatsApp personnel, mais l'ingestion de **statuts WhatsApp personnels** doit être traitée comme une capacité séparée et testée sur la version Baileys réellement déployée. Aucun support de statut n'est considéré comme garanti simplement parce que Baileys est installé.
-
-## Sécurité
-
-- aucune technique de contournement anti-spam ou anti-détection ;
-- pause globale persistante ;
-- consentement explicite et opt-out ;
-- quota quotidien côté Worker ;
-- autorisation serveur juste avant l'envoi ;
-- token interne uniquement côté serveur ;
-- session Baileys hors Git et hors frontend ;
-- déduplication des événements entrants ;
-- monotonie des reçus pour éviter de régresser `read` vers `sent`.
-
-**Important :** aucun envoi réel n'est effectué par le dépôt tant que le Worker/D1 et le connector Baileys ne sont pas réellement configurés et lancés.
+**Aucun envoi réel n'a été effectué** tant que les secrets Meta, la base D1, le webhook et le Background Worker ne sont pas configurés et testés.
