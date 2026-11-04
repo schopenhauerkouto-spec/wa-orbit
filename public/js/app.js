@@ -445,6 +445,7 @@ function updateMessageMode() {
   const isText = messageMode() === 'text';
   $('#textModeFields').classList.toggle('hidden', !isText);
   $('#templateModeFields').classList.toggle('hidden', isText);
+  $('#copyMessageBtn').classList.toggle('hidden', !isText);
   updateRecipientHint();
 }
 
