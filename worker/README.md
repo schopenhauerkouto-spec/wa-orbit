@@ -72,3 +72,49 @@ Principes :
 WA Orbit évolue vers un **agent personnel de relation** : il observe les interactions autorisées, mémorise le contexte utile, identifie les suivis pertinents, prépare une formulation adaptée et laisse l'utilisateur décider du niveau d'automatisation.
 
 Baileys pourra être ajouté comme connecteur WhatsApp séparé. Le Worker Cloudflare reste le cerveau/API ; aucune promesse de compatibilité Baileys avec le runtime Workers n'est faite ici.
+
+## Intelligence relationnelle
+
+Cette version ajoute le cœur comportemental de WA Orbit :
+
+- mémoire relationnelle persistante par contact ;
+- profil d'intérêts pondéré par sujet ;
+- moteur de décision des statuts : `ignore`, `view`, `react`, `reply`, `remember`, `continue` ;
+- budget d'interaction et cooldown pour éviter les sollicitations répétitives ;
+- génération de brouillons pour les suivis quotidiens, les statuts et les réponses entrantes ;
+- validation humaine des brouillons avant envoi ;
+- planification quotidienne Cloudflare à 08:00 UTC (08:00 Côte d'Ivoire) ;
+- politique d'interaction configurable.
+
+### API intelligence
+
+- `GET /api/drafts`
+- `POST /api/drafts/:id` avec `{"status":"approved"|"discarded","body":"..." }`
+- `POST /api/status-events` pour alimenter le moteur depuis un connecteur WhatsApp autorisé.
+- `GET/POST /api/interaction-policy`
+- `GET/POST /api/contacts/:id/interests`
+
+### Format status-events
+
+```json
+{
+  "statuses": [{
+    "external_id": "status-123",
+    "phone": "+2250700000000",
+    "content_type": "text",
+    "text": "Le contenu du statut"
+  }]
+}
+```
+
+Le moteur ne répond pas mécaniquement à chaque statut. Il évalue le sujet, les intérêts du contact, la relation, la fréquence récente et le budget social, puis choisit une action. Un connecteur WhatsApp séparé peut traduire `view`/ `react`/ `reply` en actions autorisées.
+
+### Limite importante
+
+L'API Cloud WhatsApp officielle ne fournit pas le contrôle complet des statuts personnels d'un compte WhatsApp classique. Pour cette partie, WA Orbit doit utiliser un connecteur autorisé et compatible avec le compte utilisé. Baileys peut servir de connecteur expérimental séparé, mais ne doit pas être utilisé pour contourner les protections anti-abus de WhatsApp.
+
+Les brouillons sont volontairement séparés de l'envoi. L'architecture est donc :
+
+`WhatsApp connector → perception → mémoire → décision → brouillon → validation → transport`
+
+et non `status → réponse automatique systématique`.
