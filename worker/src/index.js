@@ -96,6 +96,15 @@ async function handleWebhook(request, env, ctx) {
           "SELECT id, consent_status FROM wa_contacts WHERE phone=?"
         ).bind(phone).first();
 
+        if(contact){
+          await env.DB.prepare("INSERT OR IGNORE INTO wa_contact_profiles(contact_id,updated_at) VALUES(?,?)").bind(contact.id,receivedAt).run();
+          const contactProfile=await env.DB.prepare("SELECT follow_up_after_days FROM wa_contact_profiles WHERE contact_id=?").bind(contact.id).first();
+          const followUpDays=Math.min(365,Math.max(1,Number(contactProfile?.follow_up_after_days)||30));
+          const followUpDue=new Date(Date.parse(receivedAt)+followUpDays*86400000).toISOString();
+          await env.DB.prepare("UPDATE wa_contact_profiles SET follow_up_due_at=?,updated_at=? WHERE contact_id=?")
+            .bind(followUpDue,receivedAt,contact.id).run();
+        }
+
         if (contact && body) {
           const topics = detectTopics(body);
           if (contact.consent_status === "opted_in") {
@@ -221,9 +230,10 @@ async function selectDailyContacts(env, url) {
       AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?)
       AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id = c.id AND d.selection_date = ?)
       AND NOT EXISTS (SELECT 1 FROM wa_message_drafts d WHERE d.contact_id = c.id AND d.source_type = 'follow_up' AND d.status IN ('draft','approved'))
+      AND (p.follow_up_due_at IS NULL OR p.follow_up_due_at <= ?)
     ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at <= ? THEN 0 ELSE 1 END ASC, COALESCE(p.priority, 3) DESC, COALESCE(c.last_contacted_at, '1970-01-01') ASC, c.created_at ASC
     LIMIT ?
-  `).bind(isoNow(), isoNow(), today, remaining).all();
+  `).bind(isoNow(), today, isoNow(), isoNow(), remaining).all();
   const rows = candidates.results || [];
   if (rows.length) await env.DB.batch(rows.map(contact => env.DB.prepare(
     "INSERT OR IGNORE INTO wa_daily_selections (selection_date, contact_id, state, selected_at) VALUES (?, ?, 'selected', ?)"
@@ -451,6 +461,19 @@ async function refineDraftWithAI(env,draftId) {
 async function planDailyDrafts(env,ctx) {
   const settings=await env.DB.prepare("SELECT daily_limit,paused FROM wa_settings WHERE id=1").first();
   if(!settings||settings.paused) return {planned:0,paused:true};
+  const staleCutoff=new Date(Date.now()-24*60*60*1000).toISOString();
+  const staleContacts=await env.DB.prepare(
+    "SELECT c.id,c.last_inbound_at,COALESCE(p.follow_up_after_days,30) follow_up_after_days,p.follow_up_due_at FROM wa_contacts c LEFT JOIN wa_contact_profiles p ON p.contact_id=c.id WHERE c.conversation_state='active' AND (c.last_inbound_at IS NULL OR c.last_inbound_at<=?)"
+  ).bind(staleCutoff).all();
+  for(const item of staleContacts.results||[]){
+    await env.DB.prepare("INSERT OR IGNORE INTO wa_contact_profiles(contact_id,updated_at) VALUES(?,?)").bind(item.id,isoNow()).run();
+    const inbound=Date.parse(item.last_inbound_at||"");
+    const due=item.follow_up_due_at||(Number.isFinite(inbound)?new Date(inbound+Math.max(1,Number(item.follow_up_after_days)||30)*86400000).toISOString():isoNow());
+    await env.DB.batch([
+      env.DB.prepare("UPDATE wa_contacts SET conversation_state='waiting',updated_at=? WHERE id=? AND conversation_state='active'").bind(isoNow(),item.id),
+      env.DB.prepare("UPDATE wa_contact_profiles SET follow_up_due_at=?,updated_at=? WHERE contact_id=? AND (follow_up_due_at IS NULL OR follow_up_due_at='')").bind(due,isoNow(),item.id)
+    ]);
+  }
   const today=dayKey();
   const existing=await env.DB.prepare(
     "SELECT COUNT(*) n FROM wa_daily_selections WHERE selection_date=? AND state IN ('selected','queued','sent')"
@@ -458,8 +481,8 @@ async function planDailyDrafts(env,ctx) {
   const remaining=Math.max(0,Math.min(5,Number(settings.daily_limit)||5)-Number(existing?.n||0));
   if(!remaining) return {planned:0,paused:false,date:today};
   const candidates=await env.DB.prepare(
-    "SELECT c.id,c.display_name,COALESCE(p.preferred_tone,'natural') preferred_tone FROM wa_contacts c LEFT JOIN wa_contact_profiles p ON p.contact_id=c.id WHERE c.consent_status='opted_in' AND c.conversation_state<>'active' AND (c.cooldown_until IS NULL OR c.cooldown_until<=?) AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id=c.id AND d.selection_date=?) AND NOT EXISTS (SELECT 1 FROM wa_message_drafts d WHERE d.contact_id=c.id AND d.source_type='follow_up' AND d.status IN ('draft','approved')) ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at<=? THEN 0 ELSE 1 END,COALESCE(p.priority,3) DESC,COALESCE(c.last_contacted_at,'1970-01-01') ASC,c.created_at ASC LIMIT ?"
-  ).bind(isoNow(),today,isoNow(),remaining).all();
+    "SELECT c.id,c.display_name,COALESCE(p.preferred_tone,'natural') preferred_tone FROM wa_contacts c LEFT JOIN wa_contact_profiles p ON p.contact_id=c.id WHERE c.consent_status='opted_in' AND c.conversation_state<>'active' AND (c.cooldown_until IS NULL OR c.cooldown_until<=?) AND (p.follow_up_due_at IS NULL OR p.follow_up_due_at<=?) AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id=c.id AND d.selection_date=?) AND NOT EXISTS (SELECT 1 FROM wa_message_drafts d WHERE d.contact_id=c.id AND d.source_type='follow_up' AND d.status IN ('draft','approved')) ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at<=? THEN 0 ELSE 1 END,COALESCE(p.priority,3) DESC,COALESCE(c.last_contacted_at,'1970-01-01') ASC,c.created_at ASC LIMIT ?"
+  ).bind(isoNow(),isoNow(),today,isoNow(),remaining).all();
   let planned=0;
   for(const contact of candidates.results||[]){
     const now=isoNow();
