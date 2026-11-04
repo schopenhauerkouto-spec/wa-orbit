@@ -18,7 +18,7 @@ const config = {
   meta: {
     accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
-    apiVersion: process.env.WHATSAPP_API_VERSION || "v23.0"
+    apiVersion: process.env.WHATSAPP_API_VERSION || "v26.0"
   },
   batchSize: number("ORBIT_BATCH_SIZE", 5, 1, 5),
   minDelayMs: number("ORBIT_MIN_DELAY_MS", 30000, 0, 300000)
