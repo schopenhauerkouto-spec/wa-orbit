@@ -88,6 +88,16 @@ async function handleWebhook(request, env) {
     }
   }
   if (statements.length) await env.DB.batch(statements);
+  for (const entry of Array.isArray(payload.entry) ? payload.entry : []) for (const change of Array.isArray(entry.changes) ? entry.changes : []) for (const message of Array.isArray(change.value?.messages) ? change.value.messages : []) {
+    const phone = normalizePhone(message.from);
+    const body = text(message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || "", 1200);
+    if (!validPhone(phone) || !body) continue;
+    const contact = await env.DB.prepare("SELECT id, consent_status FROM wa_contacts WHERE phone=?").bind(phone).first();
+    if (contact?.consent_status === "opted_in") {
+      const topics = detectTopics(body);
+      await createDraft(env, { contactId: contact.id, sourceType: "conversation", sourceId: text(message.id, 200), intent: topics.length ? "discuss_topic" : "reply_naturally", tone: "natural", body: topics.length ? "Je vois 👀 Ça m’intéresse. Tu peux m’en dire un peu plus ?" : "Bien reçu. Merci pour ton message 😊", provider: "rule_engine" });
+    }
+  }
   return new Response("EVENT_RECEIVED", { status: 200, headers: { "content-type": "text/plain" } });
 }
 
