@@ -551,12 +551,12 @@ async function handleApi(request, env, url) {
   if (!env.DB) return json({ error: "Base D1 non configurée." }, 503);
   if (!authorized(request, env)) return json({ error: "Authentification requise." }, 401);
   if (request.method === "POST" && url.pathname === "/api/actions/claim") return claimActions(request, env);
-  const actionAuthorizeMatch=url.pathname.match(/^\\/api\\/actions\\/(\\d+)\\/authorize$/);
+  const actionAuthorizeMatch=url.pathname.match(/^\/api\/actions\/(\d+)\/authorize$/);
   if(actionAuthorizeMatch&&request.method==="POST"){
     const result=await authorizeAction(env,Number(actionAuthorizeMatch[1]));
     return json(result,result.reason==="action_not_found"?404:200);
   }
-  const actionResultMatch=url.pathname.match(/^\\/api\\/actions\\/(\\d+)\\/result$/);
+  const actionResultMatch=url.pathname.match(/^\/api\/actions\/(\d+)\/result$/);
   if (actionResultMatch && request.method === "POST") return recordActionResult(request, env, Number(actionResultMatch[1]));
   if (request.method === "GET" && url.pathname === "/api/actions") return listActionQueue(env,url);
   if (request.method === "GET" && url.pathname === "/api/personality") return getPersonality(env);
@@ -576,7 +576,7 @@ async function handleApi(request, env, url) {
     return json(await getInteractionPolicy(env));
   }
   if (request.method === "POST" && url.pathname === "/api/status-events") return ingestStatus(request,env);
-  const draftMatch=url.pathname.match(/^\/api\/drafts\/(\\d+)$/);
+  const draftMatch=url.pathname.match(/^\/api\/drafts\/(\d+)$/);
   if (draftMatch && request.method === "POST") return updateDraft(request,env,Number(draftMatch[1]));
   if (request.method === "POST" && url.pathname === "/api/personality") return updatePersonality(request, env);
   if (request.method === "GET" && url.pathname === "/api/safety") {
