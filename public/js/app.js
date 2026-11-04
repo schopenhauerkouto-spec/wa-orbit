@@ -1,4 +1,4 @@
-const state = { contacts: [], events: [], config: null, currentPage: 'overview', selectedConversationId: null };
+const state = { contacts: [], events: [], config: null, groupModeration: null, currentPage: 'overview', selectedConversationId: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -65,7 +65,7 @@ function showPage(page) {
   state.currentPage = page;
   $$('.page').forEach(section => section.classList.toggle('active-page', section.id === `page-${page}`));
   $$('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page && (button.classList.contains('nav-item') || button.closest('.mobile-nav'))));
-  const labels = { overview: "Vue d'ensemble", contacts: 'Contacts', inbox: 'Conversations', campaigns: 'Messages', status: 'Statuts', settings: 'Paramètres' };
+  const labels = { overview: "Vue d'ensemble", contacts: 'Contacts', inbox: 'Conversations', campaigns: 'Messages', status: 'Statuts', groups: 'Groupes & modération', settings: 'Paramètres' };
   $('#breadcrumbCurrent').textContent = labels[page] || 'Accueil';
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (page === 'campaigns') renderRecipientOptions();
@@ -73,12 +73,13 @@ function showPage(page) {
 }
 
 async function loadData() {
-  const [contacts, events, config, safety] = await Promise.all([
-    api('/api/contacts'), api('/api/events'), api('/api/config'), api('/api/safety')
+  const [contacts, events, config, safety, groupModeration] = await Promise.all([
+    api('/api/contacts'), api('/api/events'), api('/api/config'), api('/api/safety'), api('/api/groups/moderation')
   ]);
   state.contacts = contacts;
   state.events = events;
   state.config = { ...config, safety };
+  state.groupModeration = groupModeration;
   renderAll();
 }
 
@@ -89,6 +90,7 @@ function renderAll() {
   renderInbox();
   renderRecipientOptions();
   renderSettings();
+  renderGroupModeration();
 }
 
 function renderOverview() {
@@ -316,6 +318,62 @@ async function handleConversationReply(event) {
     submit.disabled = !within24h(contact.lastInboundAt) || contact.blocked;
     submit.textContent = 'Envoyer la réponse';
   }
+}
+
+function renderGroupModeration() {
+  const data = state.groupModeration;
+  if (!data?.policy || !$('#groupModerationForm')) return;
+  const p = data.policy;
+  $('#groupPolicyEnabled').checked = p.enabled === true;
+  $('#groupPolicyMode').value = p.mode || 'observe';
+  $('#groupExemptAdmins').checked = p.exemptAdmins !== false;
+  $('#groupLinksEnabled').checked = p.links?.enabled !== false;
+  $('#groupAllowAnyLinks').checked = p.links?.allowAny === true;
+  $('#groupAllowAdminLinks').checked = p.links?.allowAdmins !== false;
+  $('#groupAllowedDomains').value = (p.links?.allowedDomains || []).join('\n');
+  $('#groupBlockedDomains').value = (p.links?.blockedDomains || []).join('\n');
+  $('#groupFloodEnabled').checked = p.flood?.enabled !== false;
+  $('#groupFloodMax').value = p.flood?.maxMessages ?? 5;
+  $('#groupFloodWindow').value = p.flood?.windowSeconds ?? 10;
+  $('#groupRepeatsEnabled').checked = p.repeats?.enabled !== false;
+  $('#groupRepeatMax').value = p.repeats?.maxRepeats ?? 3;
+  $('#groupRepeatWindow').value = p.repeats?.windowSeconds ?? 120;
+  $('#groupWarningsEnabled').checked = p.warnings?.enabled !== false;
+  $('#groupWarningThreshold').value = p.warnings?.threshold ?? 3;
+  const connector = data.connector || {};
+  $('#groupTransportState').textContent = connector.liveEnforcement
+    ? 'Connecteur de groupes déclaré actif. Les capacités réelles doivent encore être confirmées pour chaque groupe.'
+    : 'Aucun connecteur de groupes n’est actif. Les règles sont enregistrées et testables, mais aucune suppression de message, sanction ou expulsion n’est exécutée.';
+  $('#groupPolicyFeedback').textContent = p.enabled ? 'Moteur activé pour la simulation ; aucun groupe réel n’est connecté.' : 'Moteur désactivé au démarrage.';
+}
+
+function groupPolicyPayload() {
+  return {
+    enabled: $('#groupPolicyEnabled').checked,
+    mode: $('#groupPolicyMode').value,
+    exemptAdmins: $('#groupExemptAdmins').checked,
+    links: {
+      enabled: $('#groupLinksEnabled').checked,
+      allowAny: $('#groupAllowAnyLinks').checked,
+      allowAdmins: $('#groupAllowAdminLinks').checked,
+      allowedDomains: $('#groupAllowedDomains').value.split(/[\\n,;]+/).map(v => v.trim()).filter(Boolean),
+      blockedDomains: $('#groupBlockedDomains').value.split(/[\\n,;]+/).map(v => v.trim()).filter(Boolean)
+    },
+    flood: {
+      enabled: $('#groupFloodEnabled').checked,
+      maxMessages: Number($('#groupFloodMax').value),
+      windowSeconds: Number($('#groupFloodWindow').value)
+    },
+    repeats: {
+      enabled: $('#groupRepeatsEnabled').checked,
+      maxRepeats: Number($('#groupRepeatMax').value),
+      windowSeconds: Number($('#groupRepeatWindow').value)
+    },
+    warnings: {
+      enabled: $('#groupWarningsEnabled').checked,
+      threshold: Number($('#groupWarningThreshold').value)
+    }
+  };
 }
 
 function renderSettings() {
@@ -625,6 +683,41 @@ function bindEvents() {
   $('#copyMessageBtn').addEventListener('click', copyMessageToClipboard);
   $('#messageText').addEventListener('input', () => $('#charCount').textContent = `${$('#messageText').value.length} / 4096`);
   $('#generateDraftBtn').addEventListener('click', generateDraft);
+  $('#groupModerationForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const submit = $('#groupModerationForm button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const response = await api('/api/groups/moderation', {
+        method: 'POST',
+        body: JSON.stringify(groupPolicyPayload())
+      });
+      state.groupModeration = { ...state.groupModeration, policy: response.policy };
+      renderGroupModeration();
+      toast('Règles de modération enregistrées. Aucun groupe réel n’est encore connecté.');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  $('#groupSimulationForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const output = $('#groupSimulationResult');
+    output.textContent = 'Analyse en cours…';
+    try {
+      const result = await api('/api/groups/moderation/simulate', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: $('#groupSimulationText').value,
+          senderIsAdmin: $('#groupSimulationAdmin').checked
+        })
+      });
+      output.textContent = JSON.stringify(result, null, 2);
+    } catch (error) {
+      output.textContent = error.message;
+    }
+  });
   $('#refreshEventsBtn').addEventListener('click', refreshAll);
   $('#recheckConfigBtn').addEventListener('click', refreshAll);
   $('#refreshQuotaBtn').addEventListener('click', refreshAll);
