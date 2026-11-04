@@ -118,3 +118,16 @@ Les brouillons sont volontairement séparés de l'envoi. L'architecture est donc
 `WhatsApp connector → perception → mémoire → décision → brouillon → validation → transport`
 
 et non `status → réponse automatique systématique`.
+
+
+### File d'actions sortantes
+
+La validation d'un brouillon ne déclenche pas directement un envoi. Le Worker crée d'abord une action idempotente dans `wa_action_queue`.
+
+- `POST /api/actions/claim` : réserve jusqu'à 5 actions validées après recontrôle pause, consentement et quota.
+- `POST /api/actions/:id/result` : enregistre `sent` ou `failed`, le provider message id et l'audit.
+- `GET /api/actions` : expose la file pour supervision.
+- Une clé `draft:<id>` empêche qu'un même brouillon soit réservé deux fois.
+- Les erreurs sont retentables jusqu'à 5 tentatives ; le transport réel reste séparé du Worker.
+
+Le connecteur ne doit jamais considérer une liste de brouillons comme une autorisation permanente : il revalide la sécurité juste avant le transport.
