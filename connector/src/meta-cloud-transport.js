@@ -1,5 +1,5 @@
 export class MetaCloudTransport {
-  constructor({accessToken, phoneNumberId, apiVersion = "v23.0", fetchImpl = fetch}) {
+  constructor({accessToken, phoneNumberId, apiVersion = "v26.0", fetchImpl = fetch}) {
     if (!accessToken || !phoneNumberId) throw new Error("META_WHATSAPP_CREDENTIALS_REQUIRED");
     this.accessToken = accessToken;
     this.phoneNumberId = phoneNumberId;
