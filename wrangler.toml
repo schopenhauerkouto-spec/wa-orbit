@@ -11,6 +11,8 @@ migrations_dir = "worker/migrations"
 
 [vars]
 BOT_AUTO_REPLY_ENABLED = "false"
+GROQ_DRAFTS_ENABLED = "false"
+GROQ_MODEL = "openai/gpt-oss-20b"
 
 [triggers]
 crons = ["0 8 * * *"]
