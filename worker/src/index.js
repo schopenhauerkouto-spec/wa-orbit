@@ -217,6 +217,7 @@ async function selectDailyContacts(env, url) {
       AND c.conversation_state <> 'active'
       AND (c.cooldown_until IS NULL OR c.cooldown_until <= ?)
       AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id = c.id AND d.selection_date = ?)
+      AND NOT EXISTS (SELECT 1 FROM wa_message_drafts d WHERE d.contact_id = c.id AND d.source_type = 'follow_up' AND d.status IN ('draft','approved'))
     ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at <= ? THEN 0 ELSE 1 END ASC, COALESCE(p.priority, 3) DESC, COALESCE(c.last_contacted_at, '1970-01-01') ASC, c.created_at ASC
     LIMIT ?
   `).bind(isoNow(), isoNow(), today, remaining).all();
@@ -256,8 +257,8 @@ async function recordContact(request, env, id) {
     await env.DB.batch([
       env.DB.prepare("UPDATE wa_contacts SET last_contacted_at=?, cooldown_until=?, conversation_state='waiting', updated_at=? WHERE id=?")
         .bind(now.toISOString(), cooldown, now.toISOString(), id),
-      env.DB.prepare("UPDATE wa_daily_selections SET state='sent', sent_at=? WHERE contact_id=? AND selection_date=?")
-        .bind(now.toISOString(), id, date)
+      env.DB.prepare("UPDATE wa_daily_selections SET state='sent', sent_at=? WHERE contact_id=? AND state IN ('selected','queued')")
+        .bind(now.toISOString(), id)
     ]);
     return json({ ok: true, contact_id: id, last_contacted_at: now.toISOString(), cooldown_until: cooldown, cooldown_days: days });
   }
@@ -357,7 +358,7 @@ async function planDailyDrafts(env) {
   const remaining=Math.max(0,Math.min(5,Number(settings.daily_limit)||5)-Number(existing?.n||0));
   if(!remaining) return {planned:0,paused:false,date:today};
   const candidates=await env.DB.prepare(
-    "SELECT c.id,c.display_name,COALESCE(p.preferred_tone,'natural') preferred_tone FROM wa_contacts c LEFT JOIN wa_contact_profiles p ON p.contact_id=c.id WHERE c.consent_status='opted_in' AND c.conversation_state<>'active' AND (c.cooldown_until IS NULL OR c.cooldown_until<=?) AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id=c.id AND d.selection_date=?) ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at<=? THEN 0 ELSE 1 END,COALESCE(p.priority,3) DESC,COALESCE(c.last_contacted_at,'1970-01-01') ASC,c.created_at ASC LIMIT ?"
+    "SELECT c.id,c.display_name,COALESCE(p.preferred_tone,'natural') preferred_tone FROM wa_contacts c LEFT JOIN wa_contact_profiles p ON p.contact_id=c.id WHERE c.consent_status='opted_in' AND c.conversation_state<>'active' AND (c.cooldown_until IS NULL OR c.cooldown_until<=?) AND NOT EXISTS (SELECT 1 FROM wa_daily_selections d WHERE d.contact_id=c.id AND d.selection_date=?) AND NOT EXISTS (SELECT 1 FROM wa_message_drafts d WHERE d.contact_id=c.id AND d.source_type='follow_up' AND d.status IN ('draft','approved')) ORDER BY CASE WHEN p.follow_up_due_at IS NOT NULL AND p.follow_up_due_at<=? THEN 0 ELSE 1 END,COALESCE(p.priority,3) DESC,COALESCE(c.last_contacted_at,'1970-01-01') ASC,c.created_at ASC LIMIT ?"
   ).bind(isoNow(),today,isoNow(),remaining).all();
   let planned=0;
   for(const contact of candidates.results||[]){
@@ -417,7 +418,24 @@ async function ingestStatus(request,env) {
 }
 
 async function listDrafts(env,url) { const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit'))||20)), status=['draft','approved','sent','discarded'].includes(url.searchParams.get('status'))?url.searchParams.get('status'):'draft'; const r=await env.DB.prepare('SELECT d.*,c.phone,c.display_name FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status=? ORDER BY d.created_at DESC LIMIT ?').bind(status,limit).all(); return json({drafts:r.results||[]}); }
-async function updateDraft(request,env,id) { const b=await readJson(request,32*1024), d=await env.DB.prepare('SELECT id,body,status FROM wa_message_drafts WHERE id=?').bind(id).first(); if(!d)return json({error:'Brouillon introuvable.'},404); const status=['approved','discarded'].includes(b.status)?b.status:d.status, body=b.body!==undefined?text(b.body,1200):d.body; await env.DB.prepare('UPDATE wa_message_drafts SET body=?,status=?,updated_at=? WHERE id=?').bind(body,status,isoNow(),id).run(); return json({ok:true,id:id,status:status,body:body}); }
+async function updateDraft(request,env,id) {
+  const body=await readJson(request,32*1024);
+  const draft=await env.DB.prepare("SELECT id,contact_id,source_type,body,status FROM wa_message_drafts WHERE id=?").bind(id).first();
+  if(!draft) return json({error:"Brouillon introuvable."},404);
+  const existingAction=await env.DB.prepare("SELECT id,status FROM wa_action_queue WHERE draft_id=? AND status IN ('queued','processing','sent')").bind(id).first();
+  if(existingAction) return json({error:"Ce brouillon est déjà dans la file ou a été envoyé ; modifie un nouveau brouillon plutôt que son contenu réservé."},409);
+  const status=["approved","discarded"].includes(body.status)?body.status:draft.status;
+  const nextBody=body.body!==undefined?text(body.body,1200):draft.body;
+  if(!nextBody) return json({error:"Le message ne peut pas être vide."},400);
+  const now=isoNow();
+  await env.DB.prepare("UPDATE wa_message_drafts SET body=?,status=?,updated_at=? WHERE id=?").bind(nextBody,status,now,id).run();
+  if(draft.source_type==="follow_up"&&status==="approved"){
+    await env.DB.prepare("UPDATE wa_daily_selections SET state='queued' WHERE contact_id=? AND state='selected'").bind(draft.contact_id).run();
+  } else if(draft.source_type==="follow_up"&&status==="discarded"){
+    await env.DB.prepare("UPDATE wa_daily_selections SET state='cancelled' WHERE contact_id=? AND state='selected'").bind(draft.contact_id).run();
+  }
+  return json({ok:true,id:Number(id),status,body:nextBody});
+}
 
 async function claimActions(request, env) {
   const body=await readJson(request,16*1024);
