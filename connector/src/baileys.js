@@ -3,8 +3,9 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState
 } from "@whiskeysockets/baileys";
+import QRCode from "qrcode";
 import { inspectGroupMessage } from "../../src/group-moderation-policy.js";
-import { mkdir, chmod } from "node:fs/promises";
+import { mkdir, chmod, rm } from "node:fs/promises";
 import path from "node:path";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -54,12 +55,20 @@ export class BaileysGroupConnector {
     this.controlPollMs = Math.max(10000, Number(controlPollMs) || 30000);
     this.policy = null;
     this.safety = { paused: true };
+    this.setup = {
+      mode: this.pairingNumber ? "pairing" : "qr",
+      pairingNumber: this.pairingNumber,
+      resetRequestedAt: null
+    };
     this.policyLoadedAt = 0;
     this.stopping = false;
+    this.resetting = false;
     this.pairingRequested = false;
+    this.lastResetHandledAt = null;
     this.socket = null;
     this.history = new Map();
     this.adminCache = new Map();
+    this.controlTimer = null;
   }
 
   async refreshControlPlane(force = false) {
@@ -68,7 +77,16 @@ export class BaileysGroupConnector {
     const control = await this.orbit.baileysConfig();
     this.policy = control.policy;
     this.safety = control.safety || { paused: true };
+    this.setup = control.setup || this.setup;
     this.policyLoadedAt = now;
+    const resetRequestedAt = this.setup?.resetRequestedAt;
+    if (
+      resetRequestedAt &&
+      (!this.lastResetHandledAt || Date.parse(resetRequestedAt) > Date.parse(this.lastResetHandledAt))
+    ) {
+      this.lastResetHandledAt = resetRequestedAt;
+      await this.resetSession();
+    }
   }
 
   remember(jid, item) {
