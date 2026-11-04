@@ -9,3 +9,16 @@ CREATE INDEX IF NOT EXISTS idx_wa_action_queue_provider_message_id
   WHERE provider_message_id IS NOT NULL;
 ALTER TABLE webhook_statuses ADD COLUMN status_rank INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE wa_action_queue ADD COLUMN provider_status_rank INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE wa_contacts ADD COLUMN last_inbound_at TEXT;
+UPDATE wa_contacts
+SET last_inbound_at = (
+  SELECT MAX(webhook_messages.received_at)
+  FROM webhook_messages
+  WHERE webhook_messages.phone = wa_contacts.phone
+)
+WHERE EXISTS (
+  SELECT 1 FROM webhook_messages
+  WHERE webhook_messages.phone = wa_contacts.phone
+);
+CREATE INDEX IF NOT EXISTS idx_wa_contacts_last_inbound
+  ON wa_contacts(last_inbound_at);
