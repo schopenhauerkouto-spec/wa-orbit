@@ -1,6 +1,6 @@
 export class OrbitClient {
   constructor({baseUrl, token, fetchImpl = fetch}) {
-    this.baseUrl = baseUrl.replace(/\\/$/, "");
+    this.baseUrl = baseUrl.replace(/\/$/, "");
     this.token = token;
     this.fetch = fetchImpl;
   }
