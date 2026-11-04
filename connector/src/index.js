@@ -27,9 +27,35 @@ export function createConnector(config) {
     });
     if (!decision.ok) return decision;
 
-    queue.push(action);
+    queue.push({...action, queuedAt:new Date().toISOString()});
     return {ok:true, queued:true};
   }
 
   return {statusReceived, executeApproved, queue};
+}
+
+
+export async function syncApproved(config, transport) {
+  const connector=createConnector(config);
+  const batch=await connector.orbit.drafts("approved");
+  const results=[];
+  for(const draft of batch.drafts||[]) {
+    const result=await connector.executeApproved({
+      id:draft.id,
+      phone:draft.phone,
+      body:draft.body,
+      consentStatus:draft.consent_status,
+      approved:true,
+      dailyCount:0,
+      dailyLimit:5
+    });
+    if(result.ok) {
+      await connector.queue.drain(async action => {
+        if(typeof transport.send !== "function") throw new Error("transport.send requis");
+        await transport.send({phone:action.phone,body:action.body});
+      });
+    }
+    results.push({id:draft.id,...result});
+  }
+  return results;
 }
