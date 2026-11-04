@@ -463,7 +463,7 @@ async function planDailyDrafts(env,ctx) {
   for(const contact of candidates.results||[]){
     const now=isoNow();
     const inserted=await env.DB.prepare(
-      "INSERT OR IGNORE INTO wa_daily_selections(selection_date,contact_id,state,selected_at) VALUES(?,?,'queued',?)"
+      "INSERT OR IGNORE INTO wa_daily_selections(selection_date,contact_id,state,selected_at) VALUES(?,?,'selected',?)"
     ).bind(today,contact.id,now).run();
     if(Number(inserted?.meta?.changes||0)!==1) continue;
     await env.DB.prepare(
