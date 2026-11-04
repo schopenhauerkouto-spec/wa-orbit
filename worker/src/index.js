@@ -702,7 +702,7 @@ async function recordActionResult(request, env, id) {
   if(body.status==="sent"){
     if(action.status!=="processing") return json({error:"Action non réservée."},409);
     const changed=await env.DB.prepare(
-      "UPDATE wa_action_queue SET status='sent',provider_status='sent',provider_message_id=?,sent_at=?,provider_status_at=?,updated_at=?,processing_started_at=NULL,error=NULL WHERE id=? AND status='processing'"
+      "UPDATE wa_action_queue SET status='sent',provider_status=CASE WHEN provider_status_rank>=1 THEN provider_status ELSE 'sent' END,provider_status_rank=MAX(provider_status_rank,1),provider_message_id=?,sent_at=?,provider_status_at=CASE WHEN provider_status_rank>=1 THEN provider_status_at ELSE ? END,updated_at=?,processing_started_at=NULL,error=NULL WHERE id=? AND status='processing'"
     ).bind(text(body.provider_message_id||"",200)||null,now,now,now,id).run();
     if(Number(changed?.meta?.changes||0)!==1) return json({error:"Action déjà traitée."},409);
     await env.DB.batch([
