@@ -92,6 +92,7 @@ Ouvre `http://127.0.0.1:3000` et connecte-toi avec `ADMIN_PASSWORD`.
 | `BOT_MAX_REPLIES_PER_CONTACT_PER_HOUR` | Plafond par contact et par heure (3 par défaut) |
 | `BOT_PERSONA` | Ton et comportement général du bot |
 | `BOT_BUSINESS_CONTEXT` | Informations vérifiées sur l'activité |
+| `BAILEYS_CONNECTOR_TOKEN` | Secret partagé entre le dashboard/API et le runner Baileys |
 
 Les secrets se configurent dans le gestionnaire de secrets de l'hébergeur ou dans `.env` en local. Ils ne doivent jamais se trouver dans `public/`.
 
@@ -125,3 +126,19 @@ npm run check
 - Meta WhatsApp Cloud API: <https://developers.facebook.com/docs/whatsapp/cloud-api/>
 - Groq rate limits: <https://console.groq.com/docs/rate-limits>
 - Groq supported models: <https://console.groq.com/docs/models>
+
+
+## Connexion WhatsApp Baileys — mode facile
+
+Le dashboard contient maintenant un panneau **Connexion WhatsApp**.
+
+- **QR** : le runner reçoit le QR de Baileys, le convertit en image et le transmet au dashboard. Tu scans directement depuis ton téléphone.
+- **Numéro** : saisis ton numéro au format code pays + chiffres, puis utilise le code de liaison affiché dans le dashboard.
+- **Réinitialiser** : le dashboard demande au runner de supprimer la session locale et de recommencer le parcours d'authentification.
+- Une fois lié, l'état d'authentification est conservé côté serveur et une reconnexion ne demande normalement pas un nouveau QR/code. citeturn722822search0turn722822search11
+
+Pour le premier déploiement du runner sur une VM Google Cloud :
+
+`sudo bash deploy/google-cloud/setup-baileys.sh`
+
+La configuration réellement interactive se fait ensuite depuis le dashboard, pas en modifiant le code.
