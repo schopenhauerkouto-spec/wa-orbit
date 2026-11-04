@@ -13,6 +13,8 @@ migrations_dir = "worker/migrations"
 BOT_AUTO_REPLY_ENABLED = "false"
 GROQ_DRAFTS_ENABLED = "false"
 GROQ_MODEL = "openai/gpt-oss-20b"
+GROQ_MAX_DRAFTS_PER_DAY = "30"
+GROQ_MAX_DRAFTS_PER_CONTACT_PER_HOUR = "3"
 
 [triggers]
 crons = ["0 8 * * *"]
