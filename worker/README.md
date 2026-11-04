@@ -43,6 +43,8 @@ Le Worker ne transmet pas lui-même les messages : il expose une file d'actions 
    - `npx wrangler secret put WHATSAPP_APP_SECRET`
    - `npx wrangler secret put WHATSAPP_VERIFY_TOKEN`
    - `npx wrangler secret put ADMIN_API_TOKEN`
+   - facultatif : `npx wrangler secret put GROQ_API_KEY` ; laisser `GROQ_DRAFTS_ENABLED = "false"` par défaut et ne l’activer qu’après avoir informé les personnes concernées du traitement externe.
+   - facultatif : `WHATSAPP_TEMPLATE_NAME` et `WHATSAPP_TEMPLATE_LANGUAGE` via `wrangler secret put` pour les messages hors fenêtre de service ; configurer aussi `WHATSAPP_TEMPLATE_BODY_PARAMETER`/`WHATSAPP_TEMPLATE_COMPONENTS_JSON` selon le modèle exact.
 5. Déployer : `npx wrangler deploy`.
 6. Configurer le webhook Meta sur `https://<worker>/webhook`.
 
@@ -90,6 +92,7 @@ Cette version ajoute le cœur comportemental de WA Orbit :
 
 - `GET /api/drafts`
 - `POST /api/drafts/:id` avec `{"status":"approved"|"discarded","body":"..." }`
+- `POST /api/drafts/:id/refine` pour demander une reformulation Groq d’un brouillon encore en attente.
 - `POST /api/status-events` pour alimenter le moteur depuis un connecteur WhatsApp autorisé.
 - `GET/POST /api/interaction-policy`
 - `GET/POST /api/contacts/:id/interests`
@@ -142,3 +145,10 @@ Les événements Meta sont vérifiés avec la signature HMAC SHA-256. Les messag
 Les accusés Meta sont stockés dans `webhook_statuses` et rapprochés de `wa_action_queue.provider_message_id`. Les baux d'action abandonnés sont récupérés après 10 minutes ; les tentatives sont limitées à cinq avec temporisation exponentielle. Les erreurs définitives sont conservées dans la file et l'audit pour inspection.
 
 La livraison côté connecteur est de type « au moins une fois » en cas de crash incertain après acceptation par le fournisseur. L'identifiant de brouillon rend la réservation interne idempotente, mais ne peut pas imposer une garantie exactly-once à un système externe.
+
+
+## Génération IA facultative
+
+Le Worker sait enrichir les brouillons avec Groq sans approuver ni envoyer le message. La fonctionnalité reste désactivée par défaut (GROQ_DRAFTS_ENABLED=false). Pour l’activer, fournir GROQ_API_KEY comme secret, puis définir GROQ_DRAFTS_ENABLED=true et éventuellement GROQ_MODEL. Le modèle par défaut est openai/gpt-oss-20b.
+
+Lorsqu’elle est activée, le Worker transmet au fournisseur le texte nécessaire du message entrant ou du statut, ainsi que le contexte relationnel minimal, afin de rédiger une proposition. L’utilisateur doit vérifier et approuver le brouillon avant qu’il puisse rejoindre la file. N’active pas cette option sans tenir compte de la confidentialité, des obligations d’information et des autorisations applicables aux conversations traitées.
