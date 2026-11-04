@@ -3,6 +3,7 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 let toastTimer;
+let groupSetupTimer = null;
 
 function toast(message) {
   const node = $('#toast');
@@ -70,6 +71,8 @@ function showPage(page) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (page === 'campaigns') renderRecipientOptions();
   if (page === 'inbox') renderInbox();
+  if (page === 'groups') startGroupSetupPolling();
+  else stopGroupSetupPolling();
 }
 
 async function loadData() {
@@ -471,6 +474,28 @@ async function refreshAll() {
   catch (error) { toast(error.message); }
 }
 
+function stopGroupSetupPolling() {
+  if (groupSetupTimer) {
+    clearInterval(groupSetupTimer);
+    groupSetupTimer = null;
+  }
+}
+
+async function refreshGroupSetup() {
+  try {
+    state.groupModeration = await api('/api/groups/moderation');
+    renderGroupModeration();
+  } catch (error) {
+    if (error.status !== 401) toast(error.message);
+  }
+}
+
+function startGroupSetupPolling() {
+  stopGroupSetupPolling();
+  refreshGroupSetup();
+  groupSetupTimer = setInterval(refreshGroupSetup, 3000);
+}
+
 function parseCsv(text) {
   text = String(text || '').replace(/^\uFEFF/, '');
   const rows = [];
@@ -743,6 +768,42 @@ function bindEvents() {
       toast(error.message);
     } finally {
       submit.disabled = false;
+    }
+  });
+  $('input[name="baileysSetupMode"]').forEach(input => input.addEventListener('change', () => {
+    const pairing = $('input[name="baileysSetupMode"]:checked')?.value === 'pairing';
+    $('#baileysPairingNumber').disabled = !pairing;
+  }));
+  $('#saveBaileysSetupBtn').addEventListener('click', async () => {
+    const mode = $('input[name="baileysSetupMode"]:checked')?.value === 'pairing' ? 'pairing' : 'qr';
+    const pairingNumber = $('#baileysPairingNumber').value.trim();
+    const button = $('#saveBaileysSetupBtn');
+    button.disabled = true;
+    try {
+      await api('/api/connectors/baileys/setup', {
+        method: 'POST',
+        body: JSON.stringify({ mode, pairingNumber })
+      });
+      await refreshGroupSetup();
+      toast(mode === 'qr' ? 'Mode QR enregistré. Le QR apparaîtra ici.' : 'Numéro enregistré. Le code de liaison apparaîtra ici.');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('#resetBaileysBtn').addEventListener('click', async () => {
+    if (!confirm('Réinitialiser la session WhatsApp ? Il faudra relier le compte avec un nouveau QR ou code.')) return;
+    const button = $('#resetBaileysBtn');
+    button.disabled = true;
+    try {
+      await api('/api/connectors/baileys/reset', { method: 'POST', body: '{}' });
+      await refreshGroupSetup();
+      toast('Réinitialisation demandée. Le prochain QR/code sera généré automatiquement.');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
     }
   });
   $('#groupSimulationForm').addEventListener('submit', async event => {
