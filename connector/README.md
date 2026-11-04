@@ -12,7 +12,7 @@ Variables d'environnement requises :
 - `ADMIN_API_TOKEN` : même secret que le Worker.
 - `WHATSAPP_ACCESS_TOKEN` : jeton d'accès Meta à conserver côté serveur.
 - `WHATSAPP_PHONE_NUMBER_ID` : identifiant du numéro WhatsApp Business.
-- `WHATSAPP_API_VERSION` : version Graph API, facultative (défaut du code : `v23.0`).
+- `WHATSAPP_API_VERSION` : version Graph API, facultative (défaut du code : `v26.0`).
 - `ORBIT_BATCH_SIZE` : 1 à 5, défaut 5.
 - `ORBIT_MIN_DELAY_MS` : délai entre deux transmissions, défaut 30000.
 - `ORBIT_POLL_INTERVAL_MS` : intervalle entre les cycles, défaut 60000.
