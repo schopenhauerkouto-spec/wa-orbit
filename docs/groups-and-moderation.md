@@ -6,7 +6,7 @@ WA Orbit doit proposer un centre de configuration par groupe : règles anti-lien
 
 ## État du code
 
-La branche ajoute un moteur de règles **indépendant du transport** et une simulation administrateur. Ce moteur :
+La branche ajoute un moteur de règles **indépendant du transport**, une simulation administrateur et un adaptateur Baileys Node.js. Baileys est désactivé par défaut et ne peut passer en enforcement réel que lorsque les garde-fous du connecteur et de la politique sont explicitement activés. Ce moteur :
 
 - extrait les domaines des liens ;
 - vérifie les domaines autorisés et interdits sans accepter les faux suffixes ;
@@ -15,7 +15,7 @@ La branche ajoute un moteur de règles **indépendant du transport** et une simu
 - permet d'exempter les administrateurs ;
 - produit une décision et les capacités requises.
 
-Il ne lit pas encore les messages des groupes WhatsApp et n'effectue aucune suppression, sanction ou expulsion. Le tableau de bord doit présenter explicitement cet état. Aucune action n'est annoncée comme active sans connecteur réel, groupe synchronisé, droits vérifiés et test de capacité réussi.
+Le connecteur Baileys peut lire les messages des groupes auxquels le compte est connecté et, en mode enforcement, supprimer un message lorsque la règle le signale et que le bot est administrateur. Il n'effectue pas de sanction de membre ni d'expulsion. Le tableau de bord doit présenter explicitement cet état. Aucune action n'est annoncée comme active sans connecteur réel, groupe synchronisé, droits vérifiés et test de capacité réussi.
 
 ## Limites WhatsApp à respecter
 
@@ -53,3 +53,15 @@ Sources de référence :
 6. Tester sur un groupe privé de test avant activation.
 
 Ne pas ajouter un client non officiel ni de mécanisme anti-détection pour contourner les restrictions de la plateforme.
+
+
+## Adaptateur Baileys
+
+Le connecteur `connector/baileys.js` utilise la politique centrale, vérifie l'arrêt d'urgence et journalise les décisions. L'enforcement est volontairement doublement verrouillé :
+
+- `BAILEYS_GROUP_ENFORCEMENT=true` côté runner ;
+- politique de groupe `enabled=true` et `mode=enforce` côté dashboard ;
+- bot administrateur du groupe ;
+- arrêt d'urgence global non activé.
+
+Les credentials Baileys ne doivent jamais être commités. Pour la production, le stockage d'authentification intégré est un compromis ; la documentation Baileys recommande un store durable personnalisé pour les déploiements sérieux.
