@@ -684,7 +684,9 @@ export default {
         return json({ error: "Erreur interne." }, 500);
       }
     }
-    if (env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response("WA Orbit Cloudflare Worker is running.", { status: 200 });
+    if (url.pathname === "/" || url.pathname === "/") {
+      return json({service:"wa-orbit-worker",status:"running",dashboard:"hosted-by-express",health:"/health"});
+    }
+    return json({error:"Route introuvable."},404);
   }
 };
