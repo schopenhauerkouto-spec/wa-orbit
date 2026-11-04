@@ -56,6 +56,14 @@ export class OrbitClient {
     });
   }
 
+
+  baileysPairingUpdate(payload) {
+    return this.request("/api/connectors/baileys/pairing-update", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   baileysEvent(payload) {
     return this.request("/api/connectors/baileys/events", {
       method: "POST",
