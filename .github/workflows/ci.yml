@@ -2,9 +2,9 @@ name: WA Orbit checks
 
 on:
   push:
-    branches: [main, feat/inbox-conversations, feat/remote-connection-safety-foundation, feat/cloudflare-workers-foundation, feat/personality-relationship-engine]
+    branches: [main, feat/inbox-conversations, feat/remote-connection-safety-foundation, feat/cloudflare-workers-foundation, feat/personality-relationship-engine, feat/group-moderation-policy-control-center]
   pull_request:
-    branches: [main, feat/remote-connection-safety-foundation, feat/cloudflare-workers-foundation]
+    branches: [main, feat/remote-connection-safety-foundation, feat/cloudflare-workers-foundation, feat/personality-relationship-engine]
 
 permissions:
   contents: read

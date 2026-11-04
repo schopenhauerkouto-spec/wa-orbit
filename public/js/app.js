@@ -1,8 +1,9 @@
-const state = { contacts: [], events: [], config: null, currentPage: 'overview', selectedConversationId: null };
+const state = { contacts: [], events: [], config: null, groupModeration: null, currentPage: 'overview', selectedConversationId: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 let toastTimer;
+let groupSetupTimer = null;
 
 function toast(message) {
   const node = $('#toast');
@@ -65,20 +66,23 @@ function showPage(page) {
   state.currentPage = page;
   $$('.page').forEach(section => section.classList.toggle('active-page', section.id === `page-${page}`));
   $$('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === page && (button.classList.contains('nav-item') || button.closest('.mobile-nav'))));
-  const labels = { overview: "Vue d'ensemble", contacts: 'Contacts', inbox: 'Conversations', campaigns: 'Messages', status: 'Statuts', settings: 'Paramètres' };
+  const labels = { overview: "Vue d'ensemble", contacts: 'Contacts', inbox: 'Conversations', campaigns: 'Messages', status: 'Statuts', groups: 'Groupes & modération', settings: 'Paramètres' };
   $('#breadcrumbCurrent').textContent = labels[page] || 'Accueil';
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (page === 'campaigns') renderRecipientOptions();
   if (page === 'inbox') renderInbox();
+  if (page === 'groups') startGroupSetupPolling();
+  else stopGroupSetupPolling();
 }
 
 async function loadData() {
-  const [contacts, events, config, safety] = await Promise.all([
-    api('/api/contacts'), api('/api/events'), api('/api/config'), api('/api/safety')
+  const [contacts, events, config, safety, groupModeration] = await Promise.all([
+    api('/api/contacts'), api('/api/events'), api('/api/config'), api('/api/safety'), api('/api/groups/moderation')
   ]);
   state.contacts = contacts;
   state.events = events;
   state.config = { ...config, safety };
+  state.groupModeration = groupModeration;
   renderAll();
 }
 
@@ -89,6 +93,7 @@ function renderAll() {
   renderInbox();
   renderRecipientOptions();
   renderSettings();
+  renderGroupModeration();
 }
 
 function renderOverview() {
@@ -318,6 +323,107 @@ async function handleConversationReply(event) {
   }
 }
 
+function renderGroupModeration() {
+  const data = state.groupModeration;
+  if (!data?.policy || !$('#groupModerationForm')) return;
+  const p = data.policy;
+  $('#groupPolicyEnabled').checked = p.enabled === true;
+  $('#groupPolicyMode').value = p.mode || 'observe';
+  $('#groupExemptAdmins').checked = p.exemptAdmins !== false;
+  $('#groupLinksEnabled').checked = p.links?.enabled !== false;
+  $('#groupAllowAnyLinks').checked = p.links?.allowAny === true;
+  $('#groupAllowAdminLinks').checked = p.links?.allowAdmins !== false;
+  $('#groupAllowedDomains').value = (p.links?.allowedDomains || []).join('\n');
+  $('#groupBlockedDomains').value = (p.links?.blockedDomains || []).join('\n');
+  $('#groupFloodEnabled').checked = p.flood?.enabled !== false;
+  $('#groupFloodMax').value = p.flood?.maxMessages ?? 5;
+  $('#groupFloodWindow').value = p.flood?.windowSeconds ?? 10;
+  $('#groupRepeatsEnabled').checked = p.repeats?.enabled !== false;
+  $('#groupRepeatMax').value = p.repeats?.maxRepeats ?? 3;
+  $('#groupRepeatWindow').value = p.repeats?.windowSeconds ?? 120;
+  $('#groupWarningsEnabled').checked = p.warnings?.enabled !== false;
+  $('#groupWarningThreshold').value = p.warnings?.threshold ?? 3;
+
+  const connector = data.connector || {};
+  $('#groupTransportState').textContent = connector.connected
+    ? (connector.liveEnforcement
+      ? 'Baileys connecté : l’enforcement est armé. La suppression exige que le bot soit administrateur du groupe.'
+      : 'Baileys connecté, mais l’enforcement live est désactivé. Les décisions restent en observation.')
+    : 'Aucun connecteur de groupes n’est actif. Les règles restent en configuration/simulation.';
+  $('#groupPolicyFeedback').textContent = p.enabled
+    ? (connector.connected ? 'Moteur actif : vérifie le mode et les droits du bot avant toute enforcement.' : 'Moteur activé, mais aucun connecteur réel n’est connecté.')
+    : 'Moteur désactivé au démarrage.';
+
+  const setup = data.setup || {};
+  const mode = setup.mode === 'pairing' ? 'pairing' : 'qr';
+  $$('input[name="baileysSetupMode"]').forEach(input => { input.checked = input.value === mode; });
+  $('#baileysPairingNumber').value = setup.pairingNumber || '';
+  $('#baileysPairingNumber').disabled = mode !== 'pairing';
+
+  const badge = $('#baileysSetupState');
+  const status = setup.status || 'idle';
+  badge.textContent = connector.connected ? 'Connecté' :
+    status === 'pairing_code' ? 'Code prêt' :
+    status === 'qr' ? 'QR prêt' :
+    status === 'logged_out' ? 'À reconnecter' :
+    status === 'resetting' || status === 'reset_requested' ? 'Réinitialisation' : 'En attente';
+  badge.className = 'setup-badge ' + (connector.connected ? 'online' : (status === 'qr' || status === 'pairing_code' ? 'waiting' : ''));
+
+  const qrWrap = $('#baileysQrWrap');
+  const codeWrap = $('#baileysPairCodeWrap');
+  const help = $('#baileysSetupHelp');
+  if (setup.qrDataUrl && !connector.connected && mode === 'qr') {
+    qrWrap.innerHTML = '<img src="' + escapeHtml(setup.qrDataUrl) + '" alt="QR de connexion WhatsApp">';
+    qrWrap.classList.remove('hidden');
+    codeWrap.classList.add('hidden');
+    help.textContent = 'Sur WhatsApp : Appareils liés → Lier un appareil → scanne le QR.';
+  } else if (setup.pairingCode && !connector.connected && mode === 'pairing') {
+    qrWrap.innerHTML = '<div class="baileys-qr-placeholder">Mode numéro actif.</div>';
+    codeWrap.classList.remove('hidden');
+    $('#baileysPairCode').textContent = setup.pairingCode;
+    help.textContent = 'Sur WhatsApp : Appareils liés → Lier avec un numéro, puis saisis ce code.';
+  } else if (connector.connected) {
+    qrWrap.innerHTML = '<div class="baileys-qr-placeholder">✅ WhatsApp est connecté.<br>La session est conservée sur le serveur.</div>';
+    codeWrap.classList.add('hidden');
+    help.textContent = 'Tu n’as plus besoin de QR ou de code. La session se reconnectera automatiquement.';
+  } else {
+    qrWrap.innerHTML = '<div class="baileys-qr-placeholder">QR en attente…<br>Le connecteur doit être démarré pour générer la connexion.</div>';
+    codeWrap.classList.add('hidden');
+    help.textContent = setup.lastError
+      ? 'Erreur : ' + setup.lastError
+      : 'Enregistre ton mode puis lance le connecteur Baileys sur le serveur.';
+  }
+}
+
+function groupPolicyPayload() {
+  return {
+    enabled: $('#groupPolicyEnabled').checked,
+    mode: $('#groupPolicyMode').value,
+    exemptAdmins: $('#groupExemptAdmins').checked,
+    links: {
+      enabled: $('#groupLinksEnabled').checked,
+      allowAny: $('#groupAllowAnyLinks').checked,
+      allowAdmins: $('#groupAllowAdminLinks').checked,
+      allowedDomains: $('#groupAllowedDomains').value.split(String.fromCharCode(10)).flatMap(line => line.split(/[,;]/)).map(v => v.trim()).filter(Boolean),
+      blockedDomains: $('#groupBlockedDomains').value.split(String.fromCharCode(10)).flatMap(line => line.split(/[,;]/)).map(v => v.trim()).filter(Boolean)
+    },
+    flood: {
+      enabled: $('#groupFloodEnabled').checked,
+      maxMessages: Number($('#groupFloodMax').value),
+      windowSeconds: Number($('#groupFloodWindow').value)
+    },
+    repeats: {
+      enabled: $('#groupRepeatsEnabled').checked,
+      maxRepeats: Number($('#groupRepeatMax').value),
+      windowSeconds: Number($('#groupRepeatWindow').value)
+    },
+    warnings: {
+      enabled: $('#groupWarningsEnabled').checked,
+      threshold: Number($('#groupWarningThreshold').value)
+    }
+  };
+}
+
 function renderSettings() {
   const cfg = state.config;
   if (!cfg) return;
@@ -367,6 +473,28 @@ function renderSettings() {
 async function refreshAll() {
   try { await loadData(); }
   catch (error) { toast(error.message); }
+}
+
+function stopGroupSetupPolling() {
+  if (groupSetupTimer) {
+    clearInterval(groupSetupTimer);
+    groupSetupTimer = null;
+  }
+}
+
+async function refreshGroupSetup() {
+  try {
+    state.groupModeration = await api('/api/groups/moderation');
+    renderGroupModeration();
+  } catch (error) {
+    if (error.status !== 401) toast(error.message);
+  }
+}
+
+function startGroupSetupPolling() {
+  stopGroupSetupPolling();
+  refreshGroupSetup();
+  groupSetupTimer = setInterval(refreshGroupSetup, 3000);
 }
 
 function parseCsv(text) {
@@ -625,6 +753,77 @@ function bindEvents() {
   $('#copyMessageBtn').addEventListener('click', copyMessageToClipboard);
   $('#messageText').addEventListener('input', () => $('#charCount').textContent = `${$('#messageText').value.length} / 4096`);
   $('#generateDraftBtn').addEventListener('click', generateDraft);
+  $('#groupModerationForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const submit = $('#groupModerationForm button[type="submit"]');
+    submit.disabled = true;
+    try {
+      const response = await api('/api/groups/moderation', {
+        method: 'POST',
+        body: JSON.stringify(groupPolicyPayload())
+      });
+      state.groupModeration = { ...state.groupModeration, policy: response.policy };
+      renderGroupModeration();
+      toast('Règles de modération enregistrées.');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  $('input[name="baileysSetupMode"]').forEach(input => input.addEventListener('change', () => {
+    const pairing = $('input[name="baileysSetupMode"]:checked')?.value === 'pairing';
+    $('#baileysPairingNumber').disabled = !pairing;
+  }));
+  $('#saveBaileysSetupBtn').addEventListener('click', async () => {
+    const mode = $('input[name="baileysSetupMode"]:checked')?.value === 'pairing' ? 'pairing' : 'qr';
+    const pairingNumber = $('#baileysPairingNumber').value.trim();
+    const button = $('#saveBaileysSetupBtn');
+    button.disabled = true;
+    try {
+      await api('/api/connectors/baileys/setup', {
+        method: 'POST',
+        body: JSON.stringify({ mode, pairingNumber })
+      });
+      await refreshGroupSetup();
+      toast(mode === 'qr' ? 'Mode QR enregistré. Le QR apparaîtra ici.' : 'Numéro enregistré. Le code de liaison apparaîtra ici.');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('#resetBaileysBtn').addEventListener('click', async () => {
+    if (!confirm('Réinitialiser la session WhatsApp ? Il faudra relier le compte avec un nouveau QR ou code.')) return;
+    const button = $('#resetBaileysBtn');
+    button.disabled = true;
+    try {
+      await api('/api/connectors/baileys/reset', { method: 'POST', body: '{}' });
+      await refreshGroupSetup();
+      toast('Réinitialisation demandée. Le prochain QR/code sera généré automatiquement.');
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('#groupSimulationForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const output = $('#groupSimulationResult');
+    output.textContent = 'Analyse en cours…';
+    try {
+      const result = await api('/api/groups/moderation/simulate', {
+        method: 'POST',
+        body: JSON.stringify({
+          text: $('#groupSimulationText').value,
+          senderIsAdmin: $('#groupSimulationAdmin').checked
+        })
+      });
+      output.textContent = JSON.stringify(result, null, 2);
+    } catch (error) {
+      output.textContent = error.message;
+    }
+  });
   $('#refreshEventsBtn').addEventListener('click', refreshAll);
   $('#recheckConfigBtn').addEventListener('click', refreshAll);
   $('#refreshQuotaBtn').addEventListener('click', refreshAll);

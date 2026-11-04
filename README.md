@@ -37,13 +37,23 @@ Le répertoire `worker/` contient désormais un backend D1 distinct du serveur h
 - rapprochement des reçus Meta `sent`, `delivered`, `read` et `failed` ;
 - contrôle de la fenêtre de service de 24 h et routage vers modèle approuvé hors fenêtre.
 
-Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et doit être déployé séparément comme Background Worker Render. Les secrets restent côté serveur. Le connecteur ne prend pas en charge Baileys ni un client non officiel pour un compte personnel.
+Le processus `connector/` transmet les actions via Meta Cloud API officielle. Il se lance avec `npm run connector:worker` et devra être déployé comme processus Node.js persistant sur une VM compatible (le candidat gratuit étudié est Google Cloud e2-micro, sous réserve de quotas et de facturation). Les secrets restent côté serveur. Le transport Meta Cloud reste officiel. Un connecteur Baileys séparé est maintenant disponible pour une session WhatsApp Web/personnelle et la modération de groupes, avec des garde-fous explicites et sans mécanisme de contournement anti-abus. Voir `connector/BAILEYS.md`.
 
 **La migration du tableau de bord n'est pas terminée :** le frontend actuel appelle encore les routes de session de l'application Express (`/api/config`, `/api/events`, etc.). Il n'est donc pas encore raccordé à toutes les routes admin du Worker. La voie Express reste l'application web historique ; la voie Cloudflare/D1 est un backend distinct en cours d'intégration.
 
 Consulte [worker/README.md](worker/README.md) et [connector/README.md](connector/README.md) pour les migrations, secrets, règles Meta et déploiement.
 
 **Limites produit :** un compte WhatsApp Messenger personnel n'est pas connecté au serveur : pour ce compte, WA Orbit prépare le texte et l'utilisateur le copie et l'envoie manuellement. Meta Cloud API ne donne pas accès aux statuts personnels ; WA Orbit ne scrape pas les statuts et n'utilise pas de client non officiel.
+
+## Groupes & modération (configuration/simulation)
+
+Le tableau de bord comprend un panneau de configuration des règles de groupe : détection des liens, listes de domaines autorisés/interdits, anti-flood, répétitions, exemptions d'administrateurs et seuil d'avertissement. Le moteur de règles est isolé du transport et dispose de tests unitaires.
+
+**État actuel : moteur + connecteur Baileys disponibles.** Le connecteur reste désactivé par défaut et l'enforcement live nécessite explicitement `BAILEYS_GROUP_ENFORCEMENT=true`, une politique `enabled=true/mode=enforce`, un bot administrateur et une sécurité globale non pausée. Les capacités réelles dépendent du compte et de WhatsApp. Voir [docs/groups-and-moderation.md](docs/groups-and-moderation.md).
+
+## Hébergement persistant sans Oracle
+
+Oracle Cloud est exclu du plan. Le candidat gratuit restant évalué est Google Cloud Compute Engine e2-micro Always Free, mais il est limité à environ 1 Go de RAM, un trafic sortant mensuel très faible et exige un compte Cloud Billing actif. Il ne s'agit pas d'une garantie de coût nul ni d'un SLA. La VM serait réservée au runner Node.js léger ; Cloudflare resterait chargé de l'API/D1 et l'IA distante. Voir [docs/hosting/google-cloud-free-tier.md](docs/hosting/google-cloud-free-tier.md).
 
 ## Limites de déploiement
 
@@ -82,8 +92,9 @@ Ouvre `http://127.0.0.1:3000` et connecte-toi avec `ADMIN_PASSWORD`.
 | `BOT_MAX_REPLIES_PER_CONTACT_PER_HOUR` | Plafond par contact et par heure (3 par défaut) |
 | `BOT_PERSONA` | Ton et comportement général du bot |
 | `BOT_BUSINESS_CONTEXT` | Informations vérifiées sur l'activité |
+| `BAILEYS_CONNECTOR_TOKEN` | Secret partagé entre le dashboard/API et le runner Baileys |
 
-Les secrets se configurent dans Render Environment ou dans `.env` en local. Ils ne doivent jamais se trouver dans `public/`.
+Les secrets se configurent dans le gestionnaire de secrets de l'hébergeur ou dans `.env` en local. Ils ne doivent jamais se trouver dans `public/`.
 
 ## Limiteur Groq
 
@@ -115,3 +126,26 @@ npm run check
 - Meta WhatsApp Cloud API: <https://developers.facebook.com/docs/whatsapp/cloud-api/>
 - Groq rate limits: <https://console.groq.com/docs/rate-limits>
 - Groq supported models: <https://console.groq.com/docs/models>
+
+
+## Connexion WhatsApp Baileys — mode facile
+
+Le dashboard contient maintenant un panneau **Connexion WhatsApp**.
+
+- **QR** : le runner reçoit le QR de Baileys, le convertit en image et le transmet au dashboard. Tu scans directement depuis ton téléphone.
+- **Numéro** : saisis ton numéro au format code pays + chiffres, puis utilise le code de liaison affiché dans le dashboard.
+- **Réinitialiser** : le dashboard demande au runner de supprimer la session locale et de recommencer le parcours d'authentification.
+- Une fois lié, l'état d'authentification est conservé côté serveur et une reconnexion ne demande normalement pas un nouveau QR/code. citeturn722822search0turn722822search11
+
+Pour le premier déploiement du runner sur une VM Google Cloud :
+
+`sudo bash deploy/google-cloud/setup-baileys.sh`
+
+La configuration réellement interactive se fait ensuite depuis le dashboard, pas en modifiant le code.
+
+
+## Application Android et PWA
+
+Une APK Android installable est construite par GitHub Actions. Au premier lancement, elle demande l'URL HTTPS racine de ton serveur WA Orbit, puis mémorise cette adresse. Le tableau de bord et ses API restent hébergés sur le serveur ; le runner Baileys continue de fonctionner côté serveur/VM. Voir [docs/android-apk.md](docs/android-apk.md).
+
+Le site dispose également d'un manifeste PWA et d'un service worker réseau uniquement : aucune donnée d'authentification, conversation, contact ou API n'est conservée hors du serveur.

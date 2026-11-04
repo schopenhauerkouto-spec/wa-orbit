@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "WA Orbit",
+  "short_name": "WA Orbit",
+  "description": "Centre de pilotage WA Orbit pour les contacts, conversations et la modération des groupes.",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d1d2b",
+  "theme_color": "#0d1d2b",
+  "icons": [
+    {
+      "src": "/icons/wa-orbit.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

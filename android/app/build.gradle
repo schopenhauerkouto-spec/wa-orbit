@@ -1,0 +1,12 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'ci.waorbit.mobile'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'ci.waorbit.mobile'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+}

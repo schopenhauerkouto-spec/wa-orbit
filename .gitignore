@@ -6,3 +6,7 @@ node_modules/
 npm-debug.log*
 data/db.json
 *.log
+
+# Baileys long-lived Signal credentials (never commit)
+data/baileys-auth/
+connector/data/baileys-auth/

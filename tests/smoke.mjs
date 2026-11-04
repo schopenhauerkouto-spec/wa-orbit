@@ -129,6 +129,41 @@ try {
   const setCookie = login.headers.get('set-cookie') || '';
   const cookie = setCookie.split(';')[0];
   assert.ok(cookie.includes('waorbit.sid='), 'Le cookie de session doit être émis.');
+  const groupPolicyUnauthenticated = await fetch(`${baseUrl}/api/groups/moderation`);
+  assert.equal(groupPolicyUnauthenticated.status, 401, 'Les règles de groupe doivent rester privées.');
+  const groupPolicyInitial = await fetch(`${baseUrl}/api/groups/moderation`, { headers: { cookie } });
+  assert.equal(groupPolicyInitial.status, 200);
+  const initialGroupPolicy = await groupPolicyInitial.json();
+  assert.equal(initialGroupPolicy.policy.enabled, false, 'La modération doit être désactivée par défaut.');
+  assert.equal(initialGroupPolicy.connector.liveEnforcement, false, 'Aucune modération réelle ne doit être annoncée.');
+
+  const groupPolicySave = await fetch(`${baseUrl}/api/groups/moderation`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({
+      enabled: true,
+      mode: 'observe',
+      links: { enabled: true, allowAny: false, allowAdmins: true, allowedDomains: ['github.com'], blockedDomains: ['blocked.example'] },
+      flood: { enabled: true, maxMessages: 4, windowSeconds: 10 },
+      repeats: { enabled: true, maxRepeats: 3, windowSeconds: 60 },
+      warnings: { enabled: true, threshold: 3 }
+    })
+  });
+  assert.equal(groupPolicySave.status, 200, 'Les règles de modération doivent être sauvegardées.');
+  const savedGroupPolicy = await groupPolicySave.json();
+  assert.equal(savedGroupPolicy.policy.enabled, true);
+  assert.deepEqual(savedGroupPolicy.policy.links.blockedDomains, ['blocked.example']);
+
+  const groupSimulation = await fetch(`${baseUrl}/api/groups/moderation/simulate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ text: 'Clique https://blocked.example/promo' })
+  });
+  assert.equal(groupSimulation.status, 200);
+  const simulatedGroupResult = await groupSimulation.json();
+  assert.equal(simulatedGroupResult.decision, 'block_link');
+  assert.equal(simulatedGroupResult.executable, false, 'La simulation ne doit jamais agir sur un vrai groupe.');
+
 
   const safetyInitial = await fetch(`${baseUrl}/api/safety`, { headers: { cookie } });
   assert.equal(safetyInitial.status, 200);

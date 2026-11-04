@@ -6,6 +6,7 @@ import connectPgSimple from 'connect-pg-simple';
 import pg from 'pg';
 import rateLimit from 'express-rate-limit';
 import crypto from 'node:crypto';
+import { defaultGroupModerationPolicy, normalizeGroupModerationPolicy, inspectGroupMessage } from './src/group-moderation-policy.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
@@ -84,7 +85,28 @@ if (!Array.isArray(db.processedMessageIds)) db.processedMessageIds = [];
 if (!db.groqQuota || typeof db.groqQuota !== 'object') db.groqQuota = null;
 if (!db.botUsage || typeof db.botUsage !== 'object') db.botUsage = null;
 if (!db.systemSafety || typeof db.systemSafety !== 'object') db.systemSafety = { paused: true, reason: 'Initialisation sécurisée', updatedAt: null };
+if (!db.baileysConnector || typeof db.baileysConnector !== 'object') {
+  db.baileysConnector = { connected: false, canDeleteMessages: false, userId: '', lastHeartbeatAt: null };
+}
+if (!db.baileysSetup || typeof db.baileysSetup !== 'object') {
+  db.baileysSetup = {
+    mode: 'qr',
+    pairingNumber: '',
+    resetRequestedAt: null,
+    updatedAt: null
+  };
+}
+const baileysLive = {
+  status: 'idle',
+  qrDataUrl: '',
+  pairingCode: '',
+  lastQrAt: null,
+  lastPairingAt: null,
+  lastError: null,
+  connectedAt: null
+};
 if (typeof db.systemSafety.paused !== 'boolean') db.systemSafety.paused = true;
+db.groupModeration = normalizeGroupModerationPolicy(db.groupModeration || defaultGroupModerationPolicy());
 for (const contact of db.contacts) { if (!Array.isArray(contact.messages)) contact.messages = []; }
 let saveChain = Promise.resolve();
 function saveDb() {
@@ -151,6 +173,14 @@ const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: '
 function requireAuth(req, res, next) {
   if (req.session?.authenticated) return next();
   return res.status(401).json({ error: 'Authentification requise.' });
+}
+function requireConnectorToken(req, res, next) {
+  const expected = process.env.BAILEYS_CONNECTOR_TOKEN;
+  const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (!expected || !safeEqual(supplied, expected)) {
+    return res.status(401).json({ error: 'Connecteur non authentifié.' });
+  }
+  return next();
 }
 function normalizePhone(value) {
   return String(value || '').replace(/[\s().-]/g, '').replace(/^00/, '+');
@@ -653,6 +683,175 @@ app.post('/api/safety/pause', requireAuth, async (req, res) => {
   addEvent({ kind: paused ? 'safety-paused' : 'safety-resumed', text: paused ? 'Arrêt d’urgence activé : les envois sortants et réponses automatiques sont suspendus.' : 'Reprise manuelle : les contrôles habituels restent obligatoires.' });
   await saveDb();
   res.json({ ok: true, ...db.systemSafety });
+});
+
+function baileysControlSnapshot() {
+  const state = db.baileysConnector || {};
+  const setup = db.baileysSetup || {};
+  return {
+    mode: setup.mode === 'pairing' ? 'pairing' : 'qr',
+    pairingNumber: setup.pairingNumber || '',
+    resetRequestedAt: setup.resetRequestedAt || null,
+    updatedAt: setup.updatedAt || null,
+    status: baileysLive.status,
+    qrDataUrl: baileysLive.qrDataUrl || '',
+    pairingCode: baileysLive.pairingCode || '',
+    lastQrAt: baileysLive.lastQrAt || null,
+    lastPairingAt: baileysLive.lastPairingAt || null,
+    lastError: baileysLive.lastError || null,
+    connectedAt: baileysLive.connectedAt || null,
+    connectorConnected: state.connected === true,
+    canDeleteMessages: state.canDeleteMessages === true,
+    liveEnforcement: state.connected === true &&
+      state.canDeleteMessages === true &&
+      process.env.BAILEYS_GROUP_ENFORCEMENT === 'true' &&
+      db.groupModeration.mode === 'enforce' &&
+      db.groupModeration.enabled === true &&
+      db.systemSafety.paused !== true
+  };
+}
+
+app.get('/api/groups/moderation', requireAuth, (req, res) => {
+  const state = db.baileysConnector || {};
+  const setup = baileysControlSnapshot();
+  res.json({
+    policy: db.groupModeration,
+    connector: {
+      connected: state.connected === true,
+      mode: state.connected === true ? 'baileys' : 'configuration_and_simulation',
+      liveEnforcement: setup.liveEnforcement,
+      canDeleteMessages: state.connected === true && state.canDeleteMessages === true,
+      lastHeartbeatAt: state.lastHeartbeatAt || null,
+      note: state.connected === true
+        ? 'Baileys est connecté. L’enforcement dépend encore de la politique, de l’arrêt d’urgence et des droits admin.'
+        : 'Baileys n’est pas connecté. Les règles restent en configuration/simulation.'
+    },
+    setup
+  });
+});
+app.post('/api/groups/moderation', requireAuth, async (req, res) => {
+  db.groupModeration = normalizeGroupModerationPolicy(req.body || {});
+  addEvent({ kind: 'group-policy-updated', text: 'Les règles de modération des groupes ont été mises à jour.' });
+  await saveDb();
+  res.json({ ok: true, policy: db.groupModeration });
+});
+app.get('/api/connectors/baileys/config', requireConnectorToken, (req, res) => {
+  const state = db.baileysConnector || {};
+  res.json({
+    policy: db.groupModeration,
+    safety: db.systemSafety,
+    enforcementRequested: process.env.BAILEYS_GROUP_ENFORCEMENT === 'true',
+    connector: state,
+    setup: baileysControlSnapshot()
+  });
+});
+
+app.post('/api/connectors/baileys/setup', requireAuth, async (req, res) => {
+  const mode = req.body?.mode === 'pairing' ? 'pairing' : 'qr';
+  const rawNumber = String(req.body?.pairingNumber || '').trim();
+  const pairingNumber = rawNumber.replace(/\D/g, '');
+  if (mode === 'pairing' && !/^\d{8,15}$/.test(pairingNumber)) {
+    return res.status(400).json({ error: 'Le numéro doit contenir uniquement le code pays et les chiffres, sans +, espace, parenthèses ni tirets.' });
+  }
+  db.baileysSetup = {
+    ...db.baileysSetup,
+    mode,
+    pairingNumber: mode === 'pairing' ? pairingNumber : '',
+    updatedAt: new Date().toISOString(),
+    resetRequestedAt: null
+  };
+  baileysLive.status = mode === 'pairing' ? 'pairing_waiting' : 'qr_waiting';
+  baileysLive.lastError = null;
+  await saveDb();
+  res.json({ ok: true, setup: baileysControlSnapshot() });
+});
+
+app.post('/api/connectors/baileys/reset', requireAuth, async (req, res) => {
+  db.baileysSetup = {
+    ...db.baileysSetup,
+    resetRequestedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  baileysLive.qrDataUrl = '';
+  baileysLive.pairingCode = '';
+  baileysLive.status = 'reset_requested';
+  baileysLive.lastError = null;
+  await saveDb();
+  res.json({ ok: true, setup: baileysControlSnapshot() });
+});
+
+
+app.post('/api/connectors/baileys/heartbeat', requireConnectorToken, async (req, res) => {
+  const connected = req.body?.connected === true;
+  db.baileysConnector = {
+    connected,
+    canDeleteMessages: req.body?.canDeleteMessages === true,
+    userId: String(req.body?.userId || '').slice(0, 100),
+    lastHeartbeatAt: new Date().toISOString()
+  };
+  baileysLive.status = connected ? 'connected' : (baileysLive.status === 'reset_requested' ? 'reset_requested' : 'disconnected');
+  if (connected) {
+    baileysLive.connectedAt = baileysLive.connectedAt || new Date().toISOString();
+    baileysLive.qrDataUrl = '';
+    baileysLive.pairingCode = '';
+    baileysLive.lastError = null;
+  }
+  await saveDb();
+  res.json({ ok: true });
+});
+
+app.post('/api/connectors/baileys/pairing-update', requireConnectorToken, async (req, res) => {
+  const status = String(req.body?.status || 'waiting').slice(0, 40);
+  const qrDataUrl = String(req.body?.qrDataUrl || '');
+  const pairingCode = String(req.body?.pairingCode || '').slice(0, 32);
+  const error = String(req.body?.error || '').slice(0, 500);
+  if (qrDataUrl && (!qrDataUrl.startsWith('data:image/png;base64,') || qrDataUrl.length > 200000)) {
+    return res.status(400).json({ error: 'QR invalide ou trop volumineux.' });
+  }
+  baileysLive.status = status;
+  if (qrDataUrl) {
+    baileysLive.qrDataUrl = qrDataUrl;
+    baileysLive.lastQrAt = new Date().toISOString();
+    baileysLive.pairingCode = '';
+  }
+  if (pairingCode) {
+    baileysLive.pairingCode = pairingCode;
+    baileysLive.lastPairingAt = new Date().toISOString();
+    baileysLive.qrDataUrl = '';
+  }
+  baileysLive.lastError = error || null;
+  if (status === 'reset-complete') {
+    db.baileysSetup.resetRequestedAt = null;
+    await saveDb();
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/connectors/baileys/events', requireConnectorToken, async (req, res) => {
+  const event = req.body && typeof req.body === 'object' ? req.body : {};
+  addEvent({
+    kind: String(event.kind || 'baileys-event').slice(0, 80),
+    text: String(event.text || 'Événement Baileys').slice(0, 500),
+    groupId: String(event.groupId || '').slice(0, 128),
+    senderId: String(event.senderId || '').slice(0, 128),
+    decision: String(event.decision || '').slice(0, 80),
+    violations: Array.isArray(event.violations) ? event.violations.slice(0, 10) : []
+  });
+  await saveDb();
+  res.json({ ok: true });
+});
+
+app.post('/api/groups/moderation/simulate', requireAuth, (req, res) => {
+  const text = String(req.body?.text || '').slice(0, 4096);
+  if (!text.trim()) return res.status(400).json({ error: 'Ajoute un message à analyser.' });
+  const result = inspectGroupMessage({
+    policy: db.groupModeration,
+    text,
+    senderId: String(req.body?.senderId || 'simulation-member'),
+    senderIsAdmin: req.body?.senderIsAdmin === true,
+    history: Array.isArray(req.body?.history) ? req.body.history.slice(-100) : []
+  });
+  return res.json(result);
 });
 
 app.get('/api/groq/quota', requireAuth, (req, res) => res.json(groqQuotaStatus()));

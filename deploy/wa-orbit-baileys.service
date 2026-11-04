@@ -1,0 +1,23 @@
+[Unit]
+Description=WA Orbit Baileys connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=waorbit
+Group=waorbit
+WorkingDirectory=/opt/wa-orbit
+EnvironmentFile=/etc/wa-orbit/baileys.env
+ExecStart=/usr/bin/node /opt/wa-orbit/connector/baileys-runner.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/wa-orbit/data
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
