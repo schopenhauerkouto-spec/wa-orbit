@@ -89,8 +89,8 @@ async function handleWebhook(request, env) {
           "INSERT INTO wa_contacts (id, phone, display_name, consent_status, created_at, updated_at) VALUES (?, ?, ?, 'unknown', ?, ?) ON CONFLICT(phone) DO UPDATE SET display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE wa_contacts.display_name END, updated_at=excluded.updated_at"
         ).bind(crypto.randomUUID(), phone, displayName, receivedAt, receivedAt).run();
         await env.DB.prepare(
-          "UPDATE wa_contacts SET last_interaction_at = ?, conversation_state = 'active', updated_at = ? WHERE phone = ?"
-        ).bind(receivedAt, receivedAt, phone).run();
+          "UPDATE wa_contacts SET last_interaction_at = ?, last_inbound_at = ?, conversation_state = 'active', updated_at = ? WHERE phone = ?"
+        ).bind(receivedAt, receivedAt, receivedAt, phone).run();
 
         const contact = await env.DB.prepare(
           "SELECT id, consent_status FROM wa_contacts WHERE phone=?"
@@ -454,11 +454,11 @@ async function claimActions(request, env) {
     const templateConfigured=Boolean(env.WHATSAPP_TEMPLATE_NAME&&env.WHATSAPP_TEMPLATE_LANGUAGE);
     const windowStart=new Date(Date.now()-24*60*60*1000).toISOString();
     const drafts=await env.DB.prepare(
-      "SELECT d.id,d.contact_id,d.body,c.phone,c.last_interaction_at FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND (c.conversation_state<>'active' OR d.source_type='conversation') AND (c.last_interaction_at>=? OR ?=1) AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id) ORDER BY d.created_at ASC LIMIT ?"
+      "SELECT d.id,d.contact_id,d.body,c.phone,c.last_inbound_at FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND (c.conversation_state<>'active' OR d.source_type='conversation') AND (c.last_inbound_at>=? OR ?=1) AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id) ORDER BY d.created_at ASC LIMIT ?"
     ).bind(windowStart,templateConfigured?1:0,Math.min(limit,capacity)).all();
     for(const draft of drafts.results||[]){
       const key="draft:"+draft.id;
-      const lastInteraction=Date.parse(draft.last_interaction_at||"");
+      const lastInteraction=Date.parse(draft.last_inbound_at||"");
       const withinServiceWindow=Number.isFinite(lastInteraction)&&lastInteraction<=Date.now()&&Date.now()-lastInteraction<=24*60*60*1000;
       const sendMode=withinServiceWindow?"text":"template";
       const payload={phone:draft.phone,body:draft.body,mode:sendMode};
@@ -504,12 +504,12 @@ async function authorizeAction(env,id) {
   const settings=await env.DB.prepare("SELECT paused FROM wa_settings WHERE id=1").first();
   if(!settings||settings.paused) return {authorized:false,reason:"emergency_pause",retryable:true};
   const action=await env.DB.prepare(
-    "SELECT q.status,q.send_mode,q.payload_json,d.source_type,c.consent_status,c.conversation_state,c.last_interaction_at FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id JOIN wa_message_drafts d ON d.id=q.draft_id WHERE q.id=?"
+    "SELECT q.status,q.send_mode,q.payload_json,d.source_type,c.consent_status,c.conversation_state,c.last_inbound_at FROM wa_action_queue q JOIN wa_contacts c ON c.id=q.contact_id JOIN wa_message_drafts d ON d.id=q.draft_id WHERE q.id=?"
   ).bind(id).first();
   if(!action) return {authorized:false,reason:"action_not_found",retryable:false};
   if(action.status!=="processing") return {authorized:false,reason:"action_not_processing",retryable:false};
   if(action.consent_status!=="opted_in") return {authorized:false,reason:"consent_required",retryable:false};
-  const lastInteraction=Date.parse(action.last_interaction_at||"");
+  const lastInteraction=Date.parse(action.last_inbound_at||"");
   const withinServiceWindow=Number.isFinite(lastInteraction)&&lastInteraction<=Date.now()&&Date.now()-lastInteraction<=24*60*60*1000;
   if(action.conversation_state==="active"&&!withinServiceWindow) return {authorized:false,reason:"conversation_active",retryable:false};
   if(!withinServiceWindow&&action.send_mode!=="template") return {authorized:false,reason:"template_required",retryable:false};
