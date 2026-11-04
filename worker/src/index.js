@@ -263,9 +263,71 @@ async function planDailyDrafts(env) { const s=await env.DB.prepare('SELECT daily
 async function ingestStatus(request,env) { const body=await readJson(request,128*1024); if(!Array.isArray(body.statuses)||body.statuses.length>100)return json({error:'Fournis 1 à 100 statuts.'},400); const policy=await getInteractionPolicy(env), results=[]; for(const item of body.statuses){const externalId=text(item.external_id||item.id,200), phone=normalizePhone(item.phone); if(!externalId||!validPhone(phone)){results.push({accepted:false,reason:'invalid_status'});continue;} const contact=await env.DB.prepare('SELECT id,display_name,conversation_state FROM wa_contacts WHERE phone=?').bind(phone).first(); if(!contact){results.push({accepted:false,reason:'unknown_contact'});continue;} const profile=await ensureInterestProfile(env,contact.id), cp=await env.DB.prepare('SELECT priority FROM wa_contact_profiles WHERE contact_id=?').bind(contact.id).first(), topics=detectTopics(item.text||item.caption||''), interest=topicInterest(topics,parseJsonSafe(profile&&profile.topics_json,{})), relationship=Math.min(100,Number(cp&&cp.priority||3)*20+(contact.conversation_state==='active'?35:0)), recent=await env.DB.prepare("SELECT COUNT(*) n FROM wa_status_events WHERE contact_id=? AND created_at>=datetime('now','-7 day') AND decision IN ('react','reply','continue')").bind(contact.id).first(), last=await env.DB.prepare("SELECT created_at FROM wa_status_events WHERE contact_id=? AND decision IN ('react','reply','continue') ORDER BY created_at DESC LIMIT 1").bind(contact.id).first(), hours=last&&last.created_at?(Date.now()-Date.parse(last.created_at))/3600000:9999, choice=chooseStatusDecision({interest:interest,relationship:relationship,recentCount:Number(recent&&recent.n||0),hoursSinceLast:hours,policy:policy,hasConversation:contact.conversation_state==='active'}), now=isoNow(); await env.DB.prepare("INSERT OR IGNORE INTO wa_status_events(external_id,contact_id,content_type,text_content,detected_topics_json,interest_score,relationship_score,opportunity_score,decision,decision_reason,interaction_state,created_at,decided_at) VALUES(?,?,?,?,?,?,?,?,?,?, 'planned',?,?)").bind(externalId,contact.id,text(item.content_type||'text',30),text(item.text||item.caption||'',2000),JSON.stringify(topics),interest,relationship,choice.score,choice.decision,choice.reason,now,now).run(); if(choice.decision==='reply'||choice.decision==='continue')await createDraft(env,{contactId:contact.id,sourceType:'status',sourceId:externalId,intent:choice.decision==='continue'?'continue_conversation':'comment_on_status',body:makeStatusDraft(contact,topics,contact.conversation_state==='active')}); else if(choice.decision==='remember'&&topics.length)await env.DB.prepare('INSERT INTO wa_relationship_memory(contact_id,memory_type,content,source,importance,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').bind(contact.id,'topic','Intérêt détecté: '+topics.join(', '),'status',Math.max(2,Math.min(5,Math.ceil(interest/20))),now,now,now).run(); results.push({accepted:true,external_id:externalId,topics:topics,interest_score:interest,decision:choice.decision,reason:choice.reason}); } return json({results},201); }
 async function listDrafts(env,url) { const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit'))||20)), status=['draft','approved','sent','discarded'].includes(url.searchParams.get('status'))?url.searchParams.get('status'):'draft'; const r=await env.DB.prepare('SELECT d.*,c.phone,c.display_name FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status=? ORDER BY d.created_at DESC LIMIT ?').bind(status,limit).all(); return json({drafts:r.results||[]}); }
 async function updateDraft(request,env,id) { const b=await readJson(request,32*1024), d=await env.DB.prepare('SELECT id,body,status FROM wa_message_drafts WHERE id=?').bind(id).first(); if(!d)return json({error:'Brouillon introuvable.'},404); const status=['approved','discarded'].includes(b.status)?b.status:d.status, body=b.body!==undefined?text(b.body,1200):d.body; await env.DB.prepare('UPDATE wa_message_drafts SET body=?,status=?,updated_at=? WHERE id=?').bind(body,status,isoNow(),id).run(); return json({ok:true,id:id,status:status,body:body}); }
+
+async function claimActions(request, env) {
+  const body=await readJson(request,16*1024);
+  const limit=Math.min(5,Math.max(1,Number(body.limit)||5));
+  const settings=await env.DB.prepare("SELECT daily_limit,paused FROM wa_settings WHERE id=1").first();
+  if(!settings||settings.paused) return json({actions:[],paused:true,remaining:0});
+  const sent=await env.DB.prepare("SELECT COUNT(*) n FROM wa_action_queue WHERE status='sent' AND sent_at>=datetime('now','start of day')").first();
+  const pending=await env.DB.prepare("SELECT COUNT(*) n FROM wa_action_queue WHERE status IN ('queued','processing') AND scheduled_at>=datetime('now','start of day')").first();
+  const used=Number(sent?.n||0)+Number(pending?.n||0);
+  const remaining=Math.max(0,Math.min(5,Number(settings.daily_limit)||5)-used);
+  if(!remaining) return json({actions:[],paused:false,remaining:0,message:"Quota quotidien atteint."});
+  const rows=await env.DB.prepare("SELECT d.id,d.contact_id,d.body,d.tone,c.phone,c.display_name,c.consent_status,c.conversation_state FROM wa_message_drafts d JOIN wa_contacts c ON c.id=d.contact_id WHERE d.status='approved' AND c.consent_status='opted_in' AND c.conversation_state<>'active' AND NOT EXISTS (SELECT 1 FROM wa_action_queue q WHERE q.draft_id=d.id AND q.status IN ('queued','processing','sent')) ORDER BY d.created_at ASC LIMIT ?").bind(Math.min(limit,remaining)).all();
+  const now=isoNow();
+  const statements=[];
+  for(const d of rows.results||[]){
+    const key="draft:"+d.id;
+    statements.push(env.DB.prepare("INSERT OR IGNORE INTO wa_action_queue(draft_id,contact_id,action_type,payload_json,status,attempts,idempotency_key,scheduled_at,created_at,updated_at) VALUES(?,?, 'send_text',?,'queued',0,?,?,?,?)").bind(d.id,d.contact_id,JSON.stringify({phone:d.phone,body:d.body}),key,now,now,now));
+    statements.push(env.DB.prepare("INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) SELECT id,?, 'claimed',?,? FROM wa_action_queue WHERE idempotency_key=?").bind(d.contact_id,JSON.stringify({draft_id:d.id}),now,key));
+  }
+  if(statements.length) await env.DB.batch(statements);
+  const claimed=await env.DB.prepare("SELECT q.id,q.draft_id,q.contact_id,q.action_type,q.payload_json,q.status,q.attempts,q.idempotency_key,q.scheduled_at,d.body,c.phone,c.display_name FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.status='queued' AND q.created_at=? ORDER BY q.id ASC").bind(now).all();
+  return json({actions:claimed.results||[],paused:false,remaining:Math.max(0,remaining-(claimed.results||[]).length)});
+}
+
+async function recordActionResult(request, env, id) {
+  const body=await readJson(request,32*1024);
+  const action=await env.DB.prepare("SELECT q.*,d.contact_id AS draft_contact_id,c.consent_status FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.id=?").bind(id).first();
+  if(!action) return json({error:"Action introuvable."},404);
+  if(["sent","cancelled"].includes(action.status)) return json({ok:true,status:action.status,id:Number(id)});
+  const now=isoNow();
+  const ok=body.status==="sent";
+  if(ok){
+    await env.DB.batch([
+      env.DB.prepare("UPDATE wa_action_queue SET status='sent',provider_message_id=?,sent_at=?,updated_at=?,error=NULL WHERE id=? AND status IN ('queued','processing')").bind(text(body.provider_message_id||"",200)||null,now,now,id),
+      env.DB.prepare("UPDATE wa_message_drafts SET status='sent',updated_at=? WHERE id=?").bind(now,action.draft_id),
+      env.DB.prepare("INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) VALUES(?,?, 'sent',?,?)").bind(id,action.contact_id,JSON.stringify({provider_message_id:body.provider_message_id||null}),now)
+    ]);
+    const contact=await env.DB.prepare("SELECT id FROM wa_contacts WHERE id=? AND consent_status='opted_in'").bind(action.contact_id).first();
+    if(contact) await recordContact({json:async()=>({action:"sent"})},env,action.contact_id);
+    return json({ok:true,id:Number(id),status:"sent"});
+  }
+  const attempts=Number(action.attempts||0)+1;
+  const maxAttempts=5;
+  const nextStatus=attempts>=maxAttempts?"failed":"queued";
+  await env.DB.batch([
+    env.DB.prepare("UPDATE wa_action_queue SET status=?,attempts=?,error=?,updated_at=?,processing_started_at=NULL WHERE id=?").bind(nextStatus,attempts,text(body.error||"send_failed",500),now,id),
+    env.DB.prepare("INSERT INTO wa_action_audit(action_id,contact_id,event,details_json,created_at) VALUES(?,?,?, ?,?)").bind(id,action.contact_id,nextStatus==="failed"?"failed":"retry",JSON.stringify({attempts,error:body.error||"send_failed"}),now)
+  ]);
+  return json({ok:false,id:Number(id),status:nextStatus,attempts});
+}
+
+async function listActionQueue(env,url) {
+  const limit=Math.min(100,Math.max(1,Number(url.searchParams.get("limit"))||20));
+  const status=["queued","processing","sent","failed","cancelled"].includes(url.searchParams.get("status"))?url.searchParams.get("status"):"queued";
+  const r=await env.DB.prepare("SELECT q.*,d.body,c.phone,c.display_name FROM wa_action_queue q JOIN wa_message_drafts d ON d.id=q.draft_id JOIN wa_contacts c ON c.id=q.contact_id WHERE q.status=? ORDER BY q.created_at DESC LIMIT ?").bind(status,limit).all();
+  return json({actions:r.results||[]});
+}
+
 async function handleApi(request, env, url) {
   if (!env.DB) return json({ error: "Base D1 non configurée." }, 503);
   if (!authorized(request, env)) return json({ error: "Authentification requise." }, 401);
+  if (request.method === "POST" && url.pathname === "/api/actions/claim") return claimActions(request, env);
+  const actionResultMatch=url.pathname.match(/^\\/api\\/actions\\/(\\d+)\\/result$/);
+  if (actionResultMatch && request.method === "POST") return recordActionResult(request, env, Number(actionResultMatch[1]));
+  if (request.method === "GET" && url.pathname === "/api/actions") return listActionQueue(env,url);
   if (request.method === "GET" && url.pathname === "/api/personality") return getPersonality(env);
   if (request.method === "GET" && url.pathname === "/api/drafts") return listDrafts(env,url);
   if (request.method === "POST" && url.pathname === "/api/drafts/claim") {
