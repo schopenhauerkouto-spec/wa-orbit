@@ -358,6 +358,7 @@ function renderGroupModeration() {
   const mode = setup.mode === 'pairing' ? 'pairing' : 'qr';
   $$('input[name="baileysSetupMode"]').forEach(input => { input.checked = input.value === mode; });
   $('#baileysPairingNumber').value = setup.pairingNumber || '';
+  $('#baileysPairingNumber').disabled = mode !== 'pairing';
 
   const badge = $('#baileysSetupState');
   const status = setup.status || 'idle';
