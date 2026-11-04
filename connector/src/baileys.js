@@ -331,17 +331,42 @@ export class BaileysGroupConnector {
     return socket;
   }
 
+  async resetSession() {
+    if (this.resetting || this.stopping) return;
+    this.resetting = true;
+    this.pairingRequested = false;
+    await this.publishPairingUpdate({ status: "resetting", qrDataUrl: "", pairingCode: "", error: "" });
+    try { this.socket?.end(undefined); } catch {}
+    await this.heartbeat(false);
+    await sleep(700);
+    await rm(this.authDir, { recursive: true, force: true });
+    await mkdir(this.authDir, { recursive: true });
+    try { await chmod(this.authDir, 0o700); } catch {}
+    this.socket = null;
+    this.adminCache.clear();
+    await this.publishPairingUpdate({ status: "reset-complete", qrDataUrl: "", pairingCode: "", error: "" });
+    this.resetting = false;
+    if (!this.stopping) await this.connect();
+  }
+
   async start() {
     await this.refreshControlPlane(true);
+    this.controlTimer = setInterval(() => {
+      this.refreshControlPlane(false).catch(error => console.error(
+        "WA Orbit control-plane refresh error:", String(error?.message || error)
+      ));
+    }, this.controlPollMs);
     if (this.safety?.paused !== true) {
       console.warn("Le système de sécurité global n'est pas en pause; le connecteur respecte néanmoins la politique et le drapeau d'enforcement.");
     }
-    return this.connect();
+    await this.connect();
+    return this.socket;
   }
 
   async stop() {
     this.stopping = true;
+    if (this.controlTimer) clearInterval(this.controlTimer);
     try { this.socket?.end(undefined); } catch {}
-    await this.orbit.baileysHeartbeat({ connected: false, canDeleteMessages: false, userId: "" });
+    await this.heartbeat(false);
   }
 }
