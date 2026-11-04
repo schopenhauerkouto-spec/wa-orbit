@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d1d2b">
+  <title>WA Orbit — Connexion</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, -apple-system, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 26px 20px; color: #f7fbff; background: radial-gradient(circle at 85% 10%, #194d50 0, transparent 34%), linear-gradient(145deg,#0b1c2b,#102e3c 62%,#102b35); }
+    main { width: min(100%, 440px); }
+    .mark { width: 60px; height: 60px; border-radius: 20px; display: grid; place-items: center; color: #072a29; background: #46d6ad; font-size: 27px; font-weight: 900; box-shadow: 0 12px 36px #0005; }
+    .eyebrow { margin: 30px 0 9px; color: #70d9bd; font-size: 11px; font-weight: 800; letter-spacing: .2em; }
+    h1 { margin: 0; font-size: clamp(32px, 9vw, 44px); line-height: 1.04; letter-spacing: -.04em; }
+    h1 span { color: #65dfbd; }
+    .intro { color: #b8c8d1; line-height: 1.6; margin: 16px 0 30px; font-size: 15px; }
+    label { display: block; margin: 0 0 9px; color: #e7f2f6; font-size: 13px; font-weight: 700; }
+    input { width: 100%; padding: 16px 15px; border-radius: 14px; border: 1px solid #375462; outline: 0; background: #081925; color: #fff; font: inherit; font-size: 15px; }
+    input:focus { border-color: #62dabb; box-shadow: 0 0 0 3px #62dabb22; }
+    button { width: 100%; margin-top: 13px; padding: 16px; border: 0; border-radius: 14px; color: #06251f; background: #61dcb9; font: inherit; font-weight: 850; font-size: 15px; }
+    button:active { transform: scale(.99); }
+    .hint { margin: 12px 0 0; color: #8fa6b1; font-size: 12px; line-height: 1.55; }
+    .security { display: flex; gap: 10px; align-items: flex-start; margin-top: 30px; padding: 14px; border: 1px solid #2a4c58; border-radius: 14px; color: #b7c9d0; font-size: 12px; line-height: 1.5; background: #ffffff08; }
+    .dot { flex: 0 0 8px; height: 8px; margin-top: 4px; border-radius: 50%; background: #5de0b6; }
+    #status { min-height: 20px; margin-top: 12px; color: #ffcf82; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark">W✳</div>
+    <p class="eyebrow">TON ESPACE DE PILOTAGE</p>
+    <h1>Bienvenue sur<br><span>WA Orbit.</span></h1>
+    <p class="intro">Indique l'adresse HTTPS de ton serveur WA Orbit. Cette configuration se fait une seule fois : l'application la mémorisera pour tes prochaines ouvertures.</p>
+    <form id="connectForm">
+      <label for="serverUrl">Adresse de ton serveur</label>
+      <input id="serverUrl" type="url" inputmode="url" autocomplete="url" placeholder="https://ton-service.onrender.com" required>
+      <button type="submit">Connecter WA Orbit <span aria-hidden="true">→</span></button>
+      <p class="hint">Saisis uniquement le domaine principal, sans /dashboard ni /api. Le serveur doit être accessible en HTTPS.</p>
+      <p id="status" role="status"></p>
+    </form>
+    <div class="security"><span class="dot"></span><span>La connexion utilise HTTPS. Le mot de passe et la session restent gérés par le serveur WA Orbit ; l'APK ne contient aucune clé API ni session WhatsApp.</span></div>
+  </main>
+  <script>
+    const form = document.getElementById('connectForm');
+    const field = document.getElementById('serverUrl');
+    const status = document.getElementById('status');
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      const url = field.value.trim();
+      if (!url.toLowerCase().startsWith('https://')) {
+        status.textContent = 'Ajoute https:// au début de ton adresse.';
+        return;
+      }
+      status.textContent = 'Connexion au serveur…';
+      if (!window.OrbitSetup || typeof window.OrbitSetup.connect !== 'function') {
+        status.textContent = 'Le composant Android n’est pas prêt. Ferme puis relance l’application.';
+        return;
+      }
+      window.OrbitSetup.connect(url);
+    });
+  </script>
+</body>
+</html>

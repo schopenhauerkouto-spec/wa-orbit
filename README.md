@@ -142,3 +142,10 @@ Pour le premier déploiement du runner sur une VM Google Cloud :
 `sudo bash deploy/google-cloud/setup-baileys.sh`
 
 La configuration réellement interactive se fait ensuite depuis le dashboard, pas en modifiant le code.
+
+
+## Application Android et PWA
+
+Une APK Android installable est construite par GitHub Actions. Au premier lancement, elle demande l'URL HTTPS racine de ton serveur WA Orbit, puis mémorise cette adresse. Le tableau de bord et ses API restent hébergés sur le serveur ; le runner Baileys continue de fonctionner côté serveur/VM. Voir [docs/android-apk.md](docs/android-apk.md).
+
+Le site dispose également d'un manifeste PWA et d'un service worker réseau uniquement : aucune donnée d'authentification, conversation, contact ou API n'est conservée hors du serveur.
