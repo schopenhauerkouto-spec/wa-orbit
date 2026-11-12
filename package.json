@@ -1,15 +1,16 @@
 {
   "name": "wa-orbit-contact-assistant",
-  "version": "1.3.0",
+  "version": "1.4.0-schopenhauer-wa",
   "private": true,
   "description": "WA Orbit — tableau de bord et bot conversationnel WhatsApp Cloud API + Groq, avec persistance PostgreSQL et contrôles de consentement.",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check public/js/app.js && node --check tests/smoke.mjs",
+    "check": "node --check server.js && node --check public/js/app.js && node --check tests/smoke.mjs && node --check src/relationship-engine.mjs && node --check tests/relationship-engine.mjs",
     "test:smoke": "node tests/smoke.mjs",
-    "test": "npm run check && npm run test:smoke"
+    "test": "npm run check && npm run test:relationship && npm run test:smoke",
+    "test:relationship": "node tests/relationship-engine.mjs"
   },
   "engines": {
     "node": ">=20 <25"
